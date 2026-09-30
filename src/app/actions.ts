@@ -124,9 +124,18 @@ export async function attachGoogleSource(_state: ActionState, formData: FormData
   try {
     const { user } = await secure(["ADMIN"], async () => null);
     const parsed = parseGoogleSheetUrl(parsedInput.data.spreadsheetUrl);
-    const source = await db.externalRegistrationSource.create({
-      data: { courseId: parsedInput.data.courseId, spreadsheetId: parsed.spreadsheetId, spreadsheetUrl: parsed.canonicalUrl, sheetGid: parsed.sheetGid, sheetName: "Form Yanıtları 1", accessMode: parsedInput.data.accessMode, status: "PAUSED", secretReference: "GOOGLE_FORMS_WEBHOOK_SECRET", createdByUserId: user.id },
+    const existing = await db.externalRegistrationSource.findUnique({
+      where: { provider_spreadsheetId_sheetGid: { provider: "GOOGLE_FORMS_SHEET", spreadsheetId: parsed.spreadsheetId, sheetGid: parsed.sheetGid } },
     });
+    if (existing && existing.courseId !== parsedInput.data.courseId) return actionError("Bu Sheet başka bir derse bağlı.");
+    const source = existing
+      ? await db.externalRegistrationSource.update({
+          where: { id: existing.id },
+          data: { spreadsheetUrl: parsed.canonicalUrl, sheetName: "Form Yanıtları 1", accessMode: parsedInput.data.accessMode, status: "PAUSED", lastErrorCode: null, nextRetryAt: null },
+        })
+      : await db.externalRegistrationSource.create({
+          data: { courseId: parsedInput.data.courseId, spreadsheetId: parsed.spreadsheetId, spreadsheetUrl: parsed.canonicalUrl, sheetGid: parsed.sheetGid, sheetName: "Form Yanıtları 1", accessMode: parsedInput.data.accessMode, status: "PAUSED", secretReference: "GOOGLE_FORMS_WEBHOOK_SECRET", createdByUserId: user.id },
+        });
     if (source.accessMode === "PUBLIC_CSV") await reconcileSource(source.id, { allowInactive: true, forceFull: true });
     await db.$transaction(async (tx) => {
       await tx.externalRegistrationSource.updateMany({ where: { courseId: source.courseId, status: "ACTIVE", id: { not: source.id } }, data: { status: "ARCHIVED", nextRetryAt: null } });
