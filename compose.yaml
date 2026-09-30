@@ -1,0 +1,64 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    restart: unless-stopped
+    container_name: rahmet-crm
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      APP_ORIGIN: ${APP_ORIGIN:?APP_ORIGIN is required}
+      NEXT_DEPLOYMENT_ID: ${NEXT_DEPLOYMENT_ID:-local}
+      GOOGLE_FORMS_WEBHOOK_SECRET: ${GOOGLE_FORMS_WEBHOOK_SECRET:?GOOGLE_FORMS_WEBHOOK_SECRET is required}
+      CRON_SECRET: ${CRON_SECRET:?CRON_SECRET is required}
+    ports:
+      - "127.0.0.1:${APP_PORT:-3018}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+      - /app/.next/cache:size=64m,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    init: true
+    pids_limit: 200
+
+  migrate:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tools
+    environment:
+      DATABASE_URL: ${MIGRATION_DATABASE_URL:-}
+    command: ["sh", "-c", "test -n \"$$DATABASE_URL\" && npx prisma migrate deploy"]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  bootstrap-admin:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tools
+    environment:
+      DATABASE_URL: ${BOOTSTRAP_DATABASE_URL:-${DATABASE_URL:-}}
+      CONFIRM_BOOTSTRAP: ${CONFIRM_BOOTSTRAP:-}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+    command: ["node", "scripts/bootstrap-admin.mjs"]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

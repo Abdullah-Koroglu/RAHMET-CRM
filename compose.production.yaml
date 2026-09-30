@@ -1,0 +1,17 @@
+services:
+  app:
+    networks:
+      - workout-tracker
+
+  migrate:
+    networks:
+      - workout-tracker
+
+  bootstrap-admin:
+    networks:
+      - workout-tracker
+
+networks:
+  workout-tracker:
+    external: true
+    name: workout-tracker_default

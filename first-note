@@ -1,0 +1,40 @@
+- ogrenci
+  - ogrenciId
+  - adi
+  - soyadi
+  - tel no
+  - adres
+  - sinif (ops)
+
+- ogrenci-ders
+
+- ders
+  - dersId
+  - adi
+  - hocaId
+  - musteri Ucret
+  - hoca Ucreti
+  - daysOfWeek
+
+- ders cetele
+  - ders cetele id
+  - dersId
+  - tarih
+  - hocaId
+  - Ucret
+
+- ogrenci cetele
+  - tarih 
+  - status
+  - ogrenciId
+
+- hoca
+  - hocaId
+  - adi / soyadi
+  - kurum ici mi
+- yil
+  - display name
+  - baslangic tarihi
+
+- odeme
+  

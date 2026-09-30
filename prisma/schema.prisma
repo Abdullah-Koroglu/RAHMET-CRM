@@ -1,0 +1,347 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["rahmet_crm"]
+}
+
+enum AcademicYearStatus {
+  PLANNED
+  ACTIVE
+  CLOSED
+
+  @@schema("rahmet_crm")
+}
+
+enum EmploymentType {
+  INTERNAL
+  EXTERNAL
+
+  @@schema("rahmet_crm")
+}
+
+enum CourseStatus {
+  ACTIVE
+  ARCHIVED
+
+  @@schema("rahmet_crm")
+}
+
+enum SourceStatus {
+  ACTIVE
+  PAUSED
+  ERROR
+  ARCHIVED
+
+  @@schema("rahmet_crm")
+}
+
+enum PreRegistrationStatus {
+  NEW
+  IN_REVIEW
+  CONTACTED
+  APPROVED
+  REJECTED
+  CONVERTED
+
+  @@schema("rahmet_crm")
+}
+
+enum ActivityType {
+  NOTE
+  STATUS_CHANGE
+  ASSIGNMENT
+  VALIDATION
+  CONVERSION
+
+  @@schema("rahmet_crm")
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+
+  @@schema("rahmet_crm")
+}
+
+enum IntegrationStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+  DEAD_LETTER
+
+  @@schema("rahmet_crm")
+}
+
+enum AppRole {
+  ADMIN
+  OPERATOR
+  VIEWER
+
+  @@schema("rahmet_crm")
+}
+
+enum SourceAccessMode {
+  PUBLIC_CSV
+  WEBHOOK_ONLY
+
+  @@schema("rahmet_crm")
+}
+
+model AppUser {
+  id                       String                       @id @default(uuid()) @db.Uuid
+  displayName              String                       @map("display_name")
+  email                    String                       @unique
+  role                     AppRole                      @default(OPERATOR)
+  isActive                 Boolean                      @default(true) @map("is_active")
+  passwordHash             String?                      @map("password_hash")
+  failedLoginCount         Int                          @default(0) @map("failed_login_count")
+  lockedUntil              DateTime?                    @map("locked_until")
+  lastLoginAt              DateTime?                    @map("last_login_at")
+  assignedPreRegistrations PreRegistration[]
+  activities               PreRegistrationActivity[]
+  conversions              PreRegistrationConversion[]
+  sources                  ExternalRegistrationSource[]
+  sessions                 UserSession[]
+  auditLogs                AuditLog[]
+  createdAt                DateTime                     @default(now()) @map("created_at")
+  updatedAt                DateTime                     @updatedAt @map("updated_at")
+
+  @@map("app_user")
+  @@schema("rahmet_crm")
+}
+
+model UserSession {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  tokenHash  String   @unique @map("token_hash")
+  expiresAt  DateTime @map("expires_at")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       AppUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("user_session")
+  @@schema("rahmet_crm")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id")
+  requestId   String?  @map("request_id")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  actor       AppUser? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("audit_log")
+  @@schema("rahmet_crm")
+}
+
+model AcademicYear {
+  id          String             @id @default(uuid()) @db.Uuid
+  displayName String             @unique @map("display_name")
+  startDate   DateTime           @map("start_date") @db.Date
+  endDate     DateTime           @map("end_date") @db.Date
+  status      AcademicYearStatus @default(PLANNED)
+  courses     Course[]
+
+  @@map("academic_year")
+  @@schema("rahmet_crm")
+}
+
+model Teacher {
+  id             String         @id @default(uuid()) @db.Uuid
+  firstName      String         @map("first_name")
+  lastName       String         @map("last_name")
+  phone          String?
+  employmentType EmploymentType @default(EXTERNAL) @map("employment_type")
+  isActive       Boolean        @default(true) @map("is_active")
+  courses        Course[]
+
+  @@map("teacher")
+  @@schema("rahmet_crm")
+}
+
+model Course {
+  id               String                       @id @default(uuid()) @db.Uuid
+  academicYearId   String                       @map("academic_year_id") @db.Uuid
+  teacherId        String                       @map("teacher_id") @db.Uuid
+  name             String
+  studentFeeAmount Decimal                      @default(0) @map("student_fee_amount") @db.Decimal(12, 2)
+  teacherFeeAmount Decimal                      @default(0) @map("teacher_fee_amount") @db.Decimal(12, 2)
+  status           CourseStatus                 @default(ACTIVE)
+  academicYear     AcademicYear                 @relation(fields: [academicYearId], references: [id])
+  teacher          Teacher                      @relation(fields: [teacherId], references: [id])
+  sources          ExternalRegistrationSource[]
+  preRegistrations PreRegistration[]
+  enrollments      Enrollment[]
+
+  @@unique([academicYearId, name])
+  @@map("course")
+  @@schema("rahmet_crm")
+}
+
+model ExternalRegistrationSource {
+  id                  String             @id @default(uuid()) @db.Uuid
+  courseId            String             @map("course_id") @db.Uuid
+  provider            String             @default("GOOGLE_FORMS_SHEET")
+  accessMode          SourceAccessMode   @default(PUBLIC_CSV) @map("access_mode")
+  spreadsheetId       String             @map("spreadsheet_id")
+  spreadsheetUrl      String             @map("spreadsheet_url")
+  sheetGid            String             @map("sheet_gid")
+  sheetName           String?            @map("sheet_name")
+  status              SourceStatus       @default(PAUSED)
+  secretReference     String?            @map("secret_reference")
+  syncCursor          String?            @map("sync_cursor")
+  lastSyncedRow       Int?               @map("last_synced_row")
+  lastSyncAt          DateTime?          @map("last_sync_at")
+  lastWebhookAt       DateTime?          @map("last_webhook_at")
+  lastSuccessAt       DateTime?          @map("last_success_at")
+  lastErrorCode       String?            @map("last_error_code")
+  consecutiveFailures Int                @default(0) @map("consecutive_failures")
+  retryAttemptCount   Int                @default(0) @map("retry_attempt_count")
+  nextRetryAt         DateTime?          @map("next_retry_at")
+  lastFullScanAt      DateTime?          @map("last_full_scan_at")
+  lastIncrementalAt   DateTime?          @map("last_incremental_at")
+  createdByUserId     String             @map("created_by_user_id") @db.Uuid
+  course              Course             @relation(fields: [courseId], references: [id])
+  createdBy           AppUser            @relation(fields: [createdByUserId], references: [id])
+  preRegistrations    PreRegistration[]
+  events              IntegrationEvent[]
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+
+  @@unique([provider, spreadsheetId, sheetGid])
+  @@unique([id, courseId])
+  @@map("external_registration_source")
+  @@schema("rahmet_crm")
+}
+
+model PreRegistration {
+  id                  String                     @id @default(uuid()) @db.Uuid
+  externalSourceId    String                     @map("external_source_id") @db.Uuid
+  courseId            String                     @map("course_id") @db.Uuid
+  sourceRecordId      String                     @map("source_record_id")
+  sourceSubmittedAt   DateTime?                  @map("source_submitted_at")
+  sourceCourseLabel   String?                    @map("source_course_label")
+  fullName            String                     @map("full_name")
+  phoneRaw            String                     @map("phone_raw")
+  phoneNormalized     String?                    @map("phone_normalized")
+  birthDate           DateTime?                  @map("birth_date") @db.Date
+  district            String?
+  previousParticipant Boolean?                   @map("previous_participant")
+  previousCourse      String?                    @map("previous_course")
+  maritalStatus       String?                    @map("marital_status")
+  childrenCount       Int?                       @map("children_count")
+  educationLevel      String?                    @map("education_level")
+  discoveryChannel    String?                    @map("discovery_channel")
+  status              PreRegistrationStatus      @default(NEW)
+  assignedOperatorId  String?                    @map("assigned_operator_id") @db.Uuid
+  validationErrors    Json?                      @map("validation_errors")
+  receivedAt          DateTime                   @default(now()) @map("received_at")
+  source              ExternalRegistrationSource @relation(fields: [externalSourceId, courseId], references: [id, courseId])
+  course              Course                     @relation(fields: [courseId], references: [id])
+  assignedOperator    AppUser?                   @relation(fields: [assignedOperatorId], references: [id])
+  activities          PreRegistrationActivity[]
+  conversion          PreRegistrationConversion?
+
+  @@unique([externalSourceId, sourceRecordId])
+  @@index([status, receivedAt])
+  @@map("pre_registration")
+  @@schema("rahmet_crm")
+}
+
+model PreRegistrationActivity {
+  id                String                 @id @default(uuid()) @db.Uuid
+  preRegistrationId String                 @map("pre_registration_id") @db.Uuid
+  actorUserId       String?                @map("actor_user_id") @db.Uuid
+  activityType      ActivityType           @map("activity_type")
+  fromStatus        PreRegistrationStatus? @map("from_status")
+  toStatus          PreRegistrationStatus? @map("to_status")
+  note              String?
+  createdAt         DateTime               @default(now()) @map("created_at")
+  preRegistration   PreRegistration        @relation(fields: [preRegistrationId], references: [id], onDelete: Cascade)
+  actor             AppUser?               @relation(fields: [actorUserId], references: [id])
+
+  @@map("pre_registration_activity")
+  @@schema("rahmet_crm")
+}
+
+model Student {
+  id          String                      @id @default(uuid()) @db.Uuid
+  firstName   String                      @map("first_name")
+  lastName    String                      @map("last_name")
+  phone       String?
+  birthDate   DateTime?                   @map("birth_date") @db.Date
+  district    String?
+  address     String?
+  classLevel  String?                     @map("class_level")
+  isActive    Boolean                     @default(true) @map("is_active")
+  enrollments Enrollment[]
+  conversions PreRegistrationConversion[]
+  createdAt   DateTime                    @default(now()) @map("created_at")
+
+  @@index([phone])
+  @@map("student")
+  @@schema("rahmet_crm")
+}
+
+model Enrollment {
+  id              String                     @id @default(uuid()) @db.Uuid
+  studentId       String                     @map("student_id") @db.Uuid
+  courseId        String                     @map("course_id") @db.Uuid
+  enrollmentDate  DateTime                   @default(now()) @map("enrollment_date") @db.Date
+  status          EnrollmentStatus           @default(ACTIVE)
+  agreedFeeAmount Decimal                    @map("agreed_fee_amount") @db.Decimal(12, 2)
+  student         Student                    @relation(fields: [studentId], references: [id])
+  course          Course                     @relation(fields: [courseId], references: [id])
+  conversion      PreRegistrationConversion?
+
+  @@unique([studentId, courseId])
+  @@map("enrollment")
+  @@schema("rahmet_crm")
+}
+
+model PreRegistrationConversion {
+  preRegistrationId String          @id @map("pre_registration_id") @db.Uuid
+  studentId         String          @map("student_id") @db.Uuid
+  enrollmentId      String?         @unique @map("enrollment_id") @db.Uuid
+  convertedByUserId String          @map("converted_by_user_id") @db.Uuid
+  convertedAt       DateTime        @default(now()) @map("converted_at")
+  preRegistration   PreRegistration @relation(fields: [preRegistrationId], references: [id])
+  student           Student         @relation(fields: [studentId], references: [id])
+  enrollment        Enrollment?     @relation(fields: [enrollmentId], references: [id])
+  convertedBy       AppUser         @relation(fields: [convertedByUserId], references: [id])
+
+  @@map("pre_registration_conversion")
+  @@schema("rahmet_crm")
+}
+
+model IntegrationEvent {
+  id               String                     @id @default(uuid()) @db.Uuid
+  externalSourceId String                     @map("external_source_id") @db.Uuid
+  eventKey         String                     @unique @map("event_key")
+  eventType        String                     @default("WEBHOOK") @map("event_type")
+  sourceRecordId   String?                    @map("source_record_id")
+  payloadHash      String?                    @map("payload_hash")
+  status           IntegrationStatus          @default(RECEIVED)
+  attemptCount     Int                        @default(1) @map("attempt_count")
+  lastErrorCode    String?                    @map("last_error_code")
+  receivedAt       DateTime                   @default(now()) @map("received_at")
+  processedAt      DateTime?                  @map("processed_at")
+  source           ExternalRegistrationSource @relation(fields: [externalSourceId], references: [id])
+
+  @@index([externalSourceId, status, receivedAt])
+  @@map("integration_event")
+  @@schema("rahmet_crm")
+}
