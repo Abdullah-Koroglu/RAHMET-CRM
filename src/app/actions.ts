@@ -34,6 +34,16 @@ const money = z
   .trim()
   .regex(/^\d{1,9}(?:\.\d{1,2})?$/)
   .transform((value) => new Prisma.Decimal(value));
+const paymentChangeSchema = z.object({
+  entryId: id,
+  studentId: id,
+  amount: money,
+  paidOn: z.string().date(),
+});
+const paymentReversalSchema = z.object({
+  entryId: id,
+  studentId: id,
+});
 const formValue = (formData: FormData, key: string) =>
   String(formData.get(key) ?? "");
 
@@ -980,6 +990,115 @@ export async function recordStudentPayment(
     return actionSuccess("Ödeme öğrenci bakiyesine eklendi.");
   } catch (error) {
     return failed("recordStudentPayment", error);
+  }
+}
+
+export async function updateStudentPayment(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = paymentChangeSchema.safeParse({
+    entryId: formValue(formData, "entryId"),
+    studentId: formValue(formData, "studentId"),
+    amount: formValue(formData, "amount"),
+    paidOn: formValue(formData, "paidOn"),
+  });
+  if (!parsed.success) return invalid();
+  try {
+    const { user } = await secure(["ADMIN"], async () => null);
+    await db.$transaction(async (tx) => {
+      const payment = await tx.studentAccountEntry.findFirstOrThrow({
+        where: {
+          id: parsed.data.entryId,
+          studentId: parsed.data.studentId,
+          entryType: "PAYMENT",
+          amount: { gt: 0 },
+        },
+      });
+      const updated = await tx.studentAccountEntry.update({
+        where: { id: payment.id },
+        data: {
+          amount: parsed.data.amount,
+          occurredOn: new Date(parsed.data.paidOn),
+        },
+      });
+      await writeAudit(
+        tx,
+        user.id,
+        "STUDENT_PAYMENT_UPDATED",
+        "StudentAccountEntry",
+        updated.id,
+        {
+          studentId: parsed.data.studentId,
+          previousAmount: payment.amount.toString(),
+          previousPaidOn: payment.occurredOn.toISOString().slice(0, 10),
+          amount: updated.amount.toString(),
+          paidOn: parsed.data.paidOn,
+        },
+      );
+    });
+    revalidatePath(`/ogrenciler/${parsed.data.studentId}`);
+    revalidatePath("/tahsilatlar");
+    return actionSuccess("Ödeme güncellendi.");
+  } catch (error) {
+    return failed("updateStudentPayment", error, "Ödeme güncellenemedi.");
+  }
+}
+
+export async function reverseStudentPayment(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = paymentReversalSchema.safeParse({
+    entryId: formValue(formData, "entryId"),
+    studentId: formValue(formData, "studentId"),
+  });
+  if (!parsed.success) return invalid();
+  try {
+    const { user } = await secure(["ADMIN"], async () => null);
+    await db.$transaction(async (tx) => {
+      const payment = await tx.studentAccountEntry.findFirstOrThrow({
+        where: {
+          id: parsed.data.entryId,
+          studentId: parsed.data.studentId,
+          entryType: "PAYMENT",
+          amount: { gt: 0 },
+        },
+      });
+      const reversalExists = await tx.auditLog.findFirst({
+        where: {
+          action: "STUDENT_PAYMENT_REVERSED",
+          metadata: { path: ["reversalOfEntryId"], equals: payment.id },
+        },
+      });
+      if (reversalExists) throw new Error("PAYMENT_ALREADY_REVERSED");
+      const reversal = await tx.studentAccountEntry.create({
+        data: {
+          studentId: payment.studentId,
+          entryType: "PAYMENT",
+          amount: payment.amount.negated(),
+          occurredOn: new Date(),
+          createdByUserId: user.id,
+        },
+      });
+      await writeAudit(
+        tx,
+        user.id,
+        "STUDENT_PAYMENT_REVERSED",
+        "StudentAccountEntry",
+        reversal.id,
+        {
+          studentId: payment.studentId,
+          reversalOfEntryId: payment.id,
+          amount: payment.amount.toString(),
+        },
+      );
+    });
+    revalidatePath(`/ogrenciler/${parsed.data.studentId}`);
+    revalidatePath("/tahsilatlar");
+    return actionSuccess("Ödeme iptal edildi; bakiyeye ters kayıt işlendi.");
+  } catch (error) {
+    return failed("reverseStudentPayment", error, "Ödeme iptal edilemedi.");
   }
 }
 

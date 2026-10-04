@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { recordStudentPayment } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
+import { PaymentActionsDialog } from "@/components/payment-actions-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -91,6 +92,20 @@ export default async function StudentDetailPage({
     },
   });
   if (!student) notFound();
+  const reversalAudits = await db.auditLog.findMany({
+    where: { action: "STUDENT_PAYMENT_REVERSED" },
+    select: { metadata: true },
+  });
+  const reversedPaymentIds = new Set(
+    reversalAudits.flatMap((audit) => {
+      const metadata = audit.metadata;
+      if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+        return [];
+      }
+      const entryId = metadata.reversalOfEntryId;
+      return typeof entryId === "string" ? [entryId] : [];
+    }),
+  );
   const balance = student.accountEntries.reduce(
     (sum, entry) => sum.plus(entry.amount),
     new Prisma.Decimal(0),
@@ -149,7 +164,9 @@ export default async function StudentDetailPage({
       if (entrySort === "description") {
         const label = (entry: (typeof student.accountEntries)[number]) =>
           entry.entryType === "PAYMENT"
-            ? "Ödeme"
+            ? entry.amount.lessThan(0)
+              ? "Ödeme iptali"
+              : "Ödeme"
             : `${entry.enrollment?.course.name ?? "Ders"} · ${entry.entryType}`;
         return multiplier * label(left).localeCompare(label(right), "tr");
       }
@@ -432,6 +449,7 @@ export default async function StudentDetailPage({
                       </TableSortLink>
                     </TableHead>
                   ))}
+                  <TableHead className="text-right">İşlem</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -440,7 +458,9 @@ export default async function StudentDetailPage({
                     <TableCell>{formatDate(entry.occurredOn)}</TableCell>
                     <TableCell>
                       {entry.entryType === "PAYMENT"
-                        ? "Ödeme"
+                        ? entry.amount.lessThan(0)
+                          ? "Ödeme iptali"
+                          : "Ödeme"
                         : entry.entryType === "SESSION_REVERSAL"
                           ? `${entry.enrollment?.course.name ?? "Ders"} · oturum iptali`
                           : `${entry.enrollment?.course.name ?? "Ders"} · gerçekleşen oturum`}
@@ -453,6 +473,23 @@ export default async function StudentDetailPage({
                       }
                     >
                       {formatMoney(entry.amount)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {user.role === "ADMIN" &&
+                      entry.entryType === "PAYMENT" &&
+                      entry.amount.greaterThan(0) &&
+                      !reversedPaymentIds.has(entry.id) ? (
+                        <PaymentActionsDialog
+                          entryId={entry.id}
+                          studentId={student.id}
+                          amount={entry.amount.toString()}
+                          paidOn={entry.occurredOn.toISOString().slice(0, 10)}
+                        />
+                      ) : reversedPaymentIds.has(entry.id) ? (
+                        <span className="text-muted-foreground">İptal edildi</span>
+                      ) : (
+                        "—"
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
