@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BookOpen, CalendarRange, GraduationCap, LayoutDashboard, LogOut, School, ShieldCheck, UsersRound } from "lucide-react";
+import { Activity, BookOpen, CalendarRange, GraduationCap, LayoutDashboard, LogOut, School, ShieldCheck, UsersRound, WalletCards } from "lucide-react";
 import { logoutAction } from "@/app/auth-actions";
 import { SessionHeartbeat } from "@/components/session-heartbeat";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -15,6 +15,7 @@ const nav = [
   { href: "/dersler", label: "Dersler", icon: BookOpen },
   { href: "/on-kayitlar", label: "Ön kayıtlar", icon: UsersRound },
   { href: "/ogrenciler", label: "Öğrenciler", icon: GraduationCap },
+  { href: "/tahsilatlar", label: "Tahsilatlar", icon: WalletCards },
   { href: "/ogretmenler", label: "Öğretmenler", icon: School },
   { href: "/akademik-yillar", label: "Akademik yıllar", icon: CalendarRange },
   { href: "/entegrasyonlar", label: "Entegrasyonlar", icon: Activity, adminOnly: true },

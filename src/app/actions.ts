@@ -13,6 +13,7 @@ import { db } from "@/lib/db";
 import { parseGoogleSheetUrl, reconcileSource } from "@/lib/google-forms";
 import { hashPassword } from "@/lib/password";
 import { log, safeErrorCode } from "@/lib/logger";
+import { monthRange, sessionChargeAmount } from "@/lib/finance";
 
 const id = z.string().uuid();
 const requiredText = (max: number) => z.string().trim().min(1).max(max);
@@ -38,6 +39,7 @@ const courseSchema = z.object({
   academicYearId: id,
   teacherId: id,
   studentFeeAmount: money,
+  monthlySessionCount: z.coerce.number().int().min(1).max(31),
   teacherFeeAmount: money,
 });
 
@@ -86,7 +88,7 @@ export async function createTeacher(_state: ActionState, formData: FormData): Pr
 }
 
 export async function createCourse(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const parsed = courseSchema.safeParse({ name: formValue(formData, "name"), academicYearId: formValue(formData, "academicYearId"), teacherId: formValue(formData, "teacherId"), studentFeeAmount: formValue(formData, "studentFeeAmount"), teacherFeeAmount: formValue(formData, "teacherFeeAmount") });
+  const parsed = courseSchema.safeParse({ name: formValue(formData, "name"), academicYearId: formValue(formData, "academicYearId"), teacherId: formValue(formData, "teacherId"), studentFeeAmount: formValue(formData, "studentFeeAmount"), monthlySessionCount: formValue(formData, "monthlySessionCount"), teacherFeeAmount: formValue(formData, "teacherFeeAmount") });
   if (!parsed.success) return invalid();
   let courseId: string;
   try {
@@ -101,7 +103,9 @@ export async function createCourse(_state: ActionState, formData: FormData): Pro
 }
 
 export async function updateCourse(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const parsed = courseSchema.extend({ id }).safeParse({ id: formValue(formData, "id"), name: formValue(formData, "name"), academicYearId: formValue(formData, "academicYearId"), teacherId: formValue(formData, "teacherId"), studentFeeAmount: formValue(formData, "studentFeeAmount"), teacherFeeAmount: formValue(formData, "teacherFeeAmount") });
+  const requestedId = id.safeParse(formValue(formData, "id"));
+  const current = requestedId.success ? await db.course.findUnique({ where: { id: requestedId.data }, select: { monthlySessionCount: true } }) : null;
+  const parsed = courseSchema.extend({ id }).safeParse({ id: formValue(formData, "id"), name: formValue(formData, "name"), academicYearId: formValue(formData, "academicYearId"), teacherId: formValue(formData, "teacherId"), studentFeeAmount: formValue(formData, "studentFeeAmount"), monthlySessionCount: formValue(formData, "monthlySessionCount") || String(current?.monthlySessionCount ?? ""), teacherFeeAmount: formValue(formData, "teacherFeeAmount") });
   if (!parsed.success) return invalid();
   try {
     const { user } = await secure(["ADMIN"], async () => null);
@@ -204,7 +208,7 @@ async function convertOnce(registrationId: string, userId: string) {
     const firstName = pieces.join(" ") || registration.fullName;
     const existing = registration.phoneNormalized ? await tx.student.findFirst({ where: { phone: registration.phoneNormalized } }) : null;
     const student = existing ?? await tx.student.create({ data: { firstName, lastName, phone: registration.phoneNormalized ?? registration.phoneRaw, birthDate: registration.birthDate, district: registration.district } });
-    const enrollment = await tx.enrollment.upsert({ where: { studentId_courseId: { studentId: student.id, courseId: registration.courseId } }, update: { status: "ACTIVE" }, create: { studentId: student.id, courseId: registration.courseId, agreedFeeAmount: registration.course.studentFeeAmount } });
+    const enrollment = await tx.enrollment.upsert({ where: { studentId_courseId: { studentId: student.id, courseId: registration.courseId } }, update: { status: "ACTIVE" }, create: { studentId: student.id, courseId: registration.courseId, agreedFeeAmount: registration.course.studentFeeAmount, monthlySessionCount: registration.course.monthlySessionCount } });
     await tx.preRegistrationConversion.create({ data: { preRegistrationId: registrationId, studentId: student.id, enrollmentId: enrollment.id, convertedByUserId: userId } });
     await tx.preRegistration.update({ where: { id: registrationId }, data: { status: "CONVERTED", assignedOperatorId: userId } });
     await tx.preRegistrationActivity.create({ data: { preRegistrationId: registrationId, actorUserId: userId, activityType: "CONVERSION", fromStatus: registration.status, toStatus: "CONVERTED", note: `Öğrenci kaydı: ${student.id}` } });
@@ -229,6 +233,92 @@ export async function convertPreRegistration(_state: ActionState, formData: Form
     revalidatePath("/ogrenciler");
     return actionSuccess("Ön kayıt öğrenci kaydına dönüştürüldü.");
   } catch (error) { return failed("convertPreRegistration", error, "Dönüşüm tamamlanamadı. Kayıt durumunu kontrol edip yeniden deneyin."); }
+}
+
+const sessionSchema = z.object({ courseId: id, sessionDate: z.string().date() });
+const sessionIdSchema = z.object({ sessionId: id });
+const paymentSchema = z.object({ studentId: id, amount: money, paidOn: z.string().date() });
+
+export async function createLessonSession(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = sessionSchema.safeParse({ courseId: formValue(formData, "courseId"), sessionDate: formValue(formData, "sessionDate") });
+  if (!parsed.success) return invalid();
+  try {
+    const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
+    await db.$transaction(async (tx) => {
+      const session = await tx.lessonSession.create({ data: { courseId: parsed.data.courseId, sessionDate: new Date(parsed.data.sessionDate) } });
+      await writeAudit(tx, user.id, "LESSON_SESSION_CREATED", "LessonSession", session.id, { courseId: session.courseId, sessionDate: parsed.data.sessionDate });
+    });
+    revalidatePath(`/dersler/${parsed.data.courseId}`);
+    return actionSuccess("Ders oturumu planlandı.");
+  } catch (error) { return failed("createLessonSession", error, "Oturum oluşturulamadı; bu tarih için zaten bir oturum olabilir."); }
+}
+
+export async function completeLessonSession(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = sessionIdSchema.safeParse({ sessionId: formValue(formData, "sessionId") });
+  if (!parsed.success) return invalid();
+  try {
+    const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
+    const courseId = await db.$transaction(async (tx) => {
+      const session = await tx.lessonSession.findUniqueOrThrow({ where: { id: parsed.data.sessionId }, include: { course: true } });
+      if (session.status !== "PLANNED") throw new Error("SESSION_NOT_PLANNED");
+      const range = monthRange(session.sessionDate);
+      const completed = await tx.lessonSession.count({ where: { courseId: session.courseId, status: "COMPLETED", sessionDate: { gte: range.start, lt: range.end } } });
+      if (completed >= session.course.monthlySessionCount) throw new Error("MONTHLY_SESSION_LIMIT");
+      const enrollments = await tx.enrollment.findMany({ where: { courseId: session.courseId, status: "ACTIVE", enrollmentDate: { lte: session.sessionDate } } });
+      await tx.lessonSession.update({ where: { id: session.id }, data: { status: "COMPLETED" } });
+      for (const enrollment of enrollments) {
+        const existingCharges = await tx.studentAccountEntry.count({ where: { enrollmentId: enrollment.id, entryType: "SESSION_CHARGE", occurredOn: { gte: range.start, lt: range.end } } });
+        if (existingCharges >= enrollment.monthlySessionCount) continue;
+        const amount = sessionChargeAmount(enrollment.agreedFeeAmount, enrollment.monthlySessionCount, existingCharges).negated();
+        await tx.studentAccountEntry.create({ data: { studentId: enrollment.studentId, enrollmentId: enrollment.id, lessonSessionId: session.id, entryType: "SESSION_CHARGE", amount, occurredOn: session.sessionDate, createdByUserId: user.id } });
+      }
+      await writeAudit(tx, user.id, "LESSON_SESSION_COMPLETED", "LessonSession", session.id, { chargedEnrollments: enrollments.length });
+      return session.courseId;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    revalidatePath(`/dersler/${courseId}`);
+    revalidatePath("/ogrenciler");
+    return actionSuccess("Oturum tamamlandı; aktif öğrencilere borç işlendi.");
+  } catch (error) { return failed("completeLessonSession", error, "Oturum tamamlanamadı. Oturum durumunu ve aylık planlı oturum sayısını kontrol edin."); }
+}
+
+export async function cancelLessonSession(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = sessionIdSchema.safeParse({ sessionId: formValue(formData, "sessionId") });
+  if (!parsed.success) return invalid();
+  try {
+    const { user } = await secure(["ADMIN"], async () => null);
+    const courseId = await db.$transaction(async (tx) => {
+      const session = await tx.lessonSession.findUniqueOrThrow({ where: { id: parsed.data.sessionId } });
+      if (session.status === "CANCELLED") throw new Error("SESSION_CANCELLED");
+      if (session.status === "COMPLETED") {
+        const charges = await tx.studentAccountEntry.findMany({ where: { lessonSessionId: session.id, entryType: "SESSION_CHARGE" } });
+        for (const charge of charges) {
+          await tx.studentAccountEntry.create({ data: { studentId: charge.studentId, enrollmentId: charge.enrollmentId, lessonSessionId: session.id, entryType: "SESSION_REVERSAL", amount: charge.amount.negated(), occurredOn: session.sessionDate, createdByUserId: user.id } });
+        }
+      }
+      await tx.lessonSession.update({ where: { id: session.id }, data: { status: "CANCELLED" } });
+      await writeAudit(tx, user.id, "LESSON_SESSION_CANCELLED", "LessonSession", session.id);
+      return session.courseId;
+    });
+    revalidatePath(`/dersler/${courseId}`);
+    revalidatePath("/ogrenciler");
+    return actionSuccess("Oturum iptal edildi; oluşan borçlar geri alındı.");
+  } catch (error) { return failed("cancelLessonSession", error); }
+}
+
+export async function recordStudentPayment(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = paymentSchema.safeParse({ studentId: formValue(formData, "studentId"), amount: formValue(formData, "amount"), paidOn: formValue(formData, "paidOn") });
+  if (!parsed.success) return invalid();
+  try {
+    const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
+    await db.$transaction(async (tx) => {
+      await tx.student.findUniqueOrThrow({ where: { id: parsed.data.studentId } });
+      const entry = await tx.studentAccountEntry.create({ data: { studentId: parsed.data.studentId, entryType: "PAYMENT", amount: parsed.data.amount, occurredOn: new Date(parsed.data.paidOn), createdByUserId: user.id } });
+      await writeAudit(tx, user.id, "STUDENT_PAYMENT_RECORDED", "StudentAccountEntry", entry.id, { studentId: parsed.data.studentId, amount: parsed.data.amount.toString(), paidOn: parsed.data.paidOn });
+    });
+    revalidatePath(`/ogrenciler/${parsed.data.studentId}`);
+    revalidatePath("/ogrenciler");
+    return actionSuccess("Ödeme öğrenci bakiyesine eklendi.");
+  } catch (error) { return failed("recordStudentPayment", error); }
 }
 
 const strongPassword = z.string().min(14).max(200).refine((value) => /[A-ZÇĞİÖŞÜ]/.test(value) && /[a-zçğıöşü]/.test(value) && /\d/.test(value), { message: "Parola en az 14 karakter, büyük/küçük harf ve rakam içermelidir." });
