@@ -18,8 +18,20 @@ export function parseGoogleSheetUrl(value: string) {
   return { spreadsheetId: match[1], sheetGid: gid, canonicalUrl: `https://docs.google.com/spreadsheets/d/${match[1]}/edit?gid=${gid}` };
 }
 
+const normalizeHeader = (value: string) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase("tr-TR");
+
 const first = (row: Record<string, string>, names: string[]) => {
-  for (const name of names) if (row[name]?.trim()) return row[name].trim();
+  const entries = Object.entries(row);
+  for (const name of names) {
+    const expected = normalizeHeader(name);
+    const exact = entries.find(([header, value]) => normalizeHeader(header) === expected && value?.trim());
+    if (exact) return exact[1].trim();
+  }
+  for (const name of names) {
+    const expected = normalizeHeader(name);
+    const prefixed = entries.find(([header, value]) => normalizeHeader(header).startsWith(`${expected} `) && value?.trim());
+    if (prefixed) return prefixed[1].trim();
+  }
   return null;
 };
 
@@ -47,7 +59,7 @@ function mapRow(row: Record<string, string>, sourceRecordId: string, rowNumber: 
   const phoneRaw = first(row, ["Telefon numaranız"]) ?? "";
   const previous = first(row, ["Daha önce kurumumuzda başka bir eğitime katıldınız mı?"]);
   const children = first(row, ["Kaç çocuğunuz var?"]);
-  const discoveryHeader = Object.keys(row).find((key) => key.includes("nasıl haberdar oldunuz"));
+  const discoveryHeader = Object.keys(row).find((key) => normalizeHeader(key).includes("nasıl haberdar oldunuz"));
   return {
     schemaVersion: 1,
     sourceRecordId,
