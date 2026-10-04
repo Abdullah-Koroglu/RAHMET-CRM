@@ -5,9 +5,9 @@ import {
   addPreRegistrationNote,
   changePreRegistrationStatus,
   convertPreRegistration,
-  createManualPreRegistration,
 } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
+import { ManualPreRegistrationDialog } from "@/components/manual-pre-registration-dialog";
 import { PageHeader } from "@/components/page-header";
 import { Pagination } from "@/components/pagination";
 import { StatusBadge } from "@/components/status-badge";
@@ -117,64 +117,9 @@ export default async function PreRegistrationsPage({
         description="Form yanıtlarını inceleyin, iletişim sürecini yönetin ve kesin kayda dönüştürün."
       />
       {canMutate ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Manuel ön kayıt ekle</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ActionForm
-              action={createManualPreRegistration}
-              className="grid gap-3 md:grid-cols-2 xl:grid-cols-5 xl:items-end"
-            >
-              <div className="space-y-2">
-                <Label htmlFor="manual-full-name">Ad soyad</Label>
-                <Input
-                  id="manual-full-name"
-                  name="fullName"
-                  maxLength={200}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="manual-phone">Telefon</Label>
-                <Input
-                  id="manual-phone"
-                  name="phoneRaw"
-                  inputMode="tel"
-                  maxLength={50}
-                  placeholder="05xx xxx xx xx"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="manual-course">Ders</Label>
-                <Select name="courseId">
-                  <SelectTrigger id="manual-course" className="w-full">
-                    <SelectValue placeholder="Ders seçin" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {courses.map((course) => (
-                      <SelectItem key={course.id} value={course.id}>
-                        {course.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="manual-birth-date">Doğum tarihi</Label>
-                  <Input id="manual-birth-date" name="birthDate" type="date" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="manual-district">İlçe</Label>
-                  <Input id="manual-district" name="district" maxLength={100} />
-                </div>
-              </div>
-              <Button type="submit">Ön kayıt oluştur</Button>
-            </ActionForm>
-          </CardContent>
-        </Card>
+        <div className="flex justify-end">
+          <ManualPreRegistrationDialog courses={courses} />
+        </div>
       ) : null}
       <Card>
         <CardContent className="pt-6">
