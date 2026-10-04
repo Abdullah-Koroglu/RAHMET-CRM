@@ -51,7 +51,7 @@ export default async function CoursesPage({
       academicYear: true,
       teacher: true,
       sources: {
-        where: { status: { not: "ARCHIVED" } },
+        where: { status: { not: "ARCHIVED" }, provider: { not: "MANUAL" } },
         orderBy: { createdAt: "desc" },
         take: 1,
       },

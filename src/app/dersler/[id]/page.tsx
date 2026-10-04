@@ -50,7 +50,10 @@ export default async function CourseDetailPage({
       include: {
         academicYear: true,
         teacher: true,
-        sources: { orderBy: { createdAt: "desc" } },
+        sources: {
+          where: { provider: { not: "MANUAL" } },
+          orderBy: { createdAt: "desc" },
+        },
       },
     }),
     db.academicYear.findMany({ orderBy: { startDate: "desc" } }),
