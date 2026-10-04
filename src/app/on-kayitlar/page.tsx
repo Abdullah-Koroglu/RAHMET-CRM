@@ -4,9 +4,9 @@ import { z } from "zod";
 import {
   addPreRegistrationNote,
   changePreRegistrationStatus,
-  convertPreRegistration,
 } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
+import { ConvertPreRegistrationDialog } from "@/components/convert-pre-registration-dialog";
 import { ManualPreRegistrationDialog } from "@/components/manual-pre-registration-dialog";
 import { PageHeader } from "@/components/page-header";
 import { Pagination } from "@/components/pagination";
@@ -329,12 +329,11 @@ export default async function PreRegistrationsPage({
                       </Button>
                     </ActionForm>
                     {selected.status === "APPROVED" ? (
-                      <ActionForm action={convertPreRegistration}>
-                        <input type="hidden" name="id" value={selected.id} />
-                        <Button type="submit" className="w-full">
-                          Kesin öğrenci kaydına dönüştür
-                        </Button>
-                      </ActionForm>
+                      <ConvertPreRegistrationDialog
+                        id={selected.id}
+                        fullName={selected.fullName}
+                        courseName={selected.course.name}
+                      />
                     ) : null}
                   </>
                 ) : null}
