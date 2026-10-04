@@ -8,6 +8,7 @@ import {
 import { ActionForm } from "@/components/action-form";
 import { ConvertPreRegistrationDialog } from "@/components/convert-pre-registration-dialog";
 import { ManualPreRegistrationDialog } from "@/components/manual-pre-registration-dialog";
+import { TableSortLink } from "@/components/table-sort-link";
 import { PageHeader } from "@/components/page-header";
 import { Pagination } from "@/components/pagination";
 import { StatusBadge } from "@/components/status-badge";
@@ -60,6 +61,14 @@ export default async function PreRegistrationsPage({
   const parsedCourse = z.string().uuid().safeParse(single(params.courseId));
   const courseId = parsedCourse.success ? parsedCourse.data : undefined;
   const parsedSelected = z.string().uuid().safeParse(single(params.selected));
+  const sort = z
+    .enum(["name", "course", "status", "received"])
+    .catch("received")
+    .parse(single(params.sort));
+  const direction = z
+    .enum(["asc", "desc"])
+    .catch("desc")
+    .parse(single(params.direction));
   const selectedId = parsedSelected.success ? parsedSelected.data : undefined;
   const { page, pageSize, skip } = pagination(params);
   const where: Prisma.PreRegistrationWhereInput = {
@@ -79,7 +88,14 @@ export default async function PreRegistrationsPage({
     db.preRegistration.findMany({
       where,
       include: { course: true, source: true, assignedOperator: true },
-      orderBy: { receivedAt: "desc" },
+      orderBy:
+        sort === "name"
+          ? { fullName: direction }
+          : sort === "course"
+            ? { course: { name: direction } }
+            : sort === "status"
+              ? { status: direction }
+              : { receivedAt: direction },
       skip,
       take: pageSize,
     }),
@@ -109,6 +125,8 @@ export default async function PreRegistrationsPage({
     q,
     status: status ?? "ALL",
     courseId: courseId ?? "ALL",
+    sort,
+    direction,
   };
   return (
     <div className="space-y-6">
@@ -175,11 +193,83 @@ export default async function PreRegistrationsPage({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Başvuru</TableHead>
-                  <TableHead>Ders</TableHead>
+                  <TableHead>
+                    <TableSortLink
+                      href={{
+                        pathname: "/on-kayitlar",
+                        query: {
+                          ...filterParams,
+                          sort: "name",
+                          direction:
+                            sort === "name" && direction === "asc"
+                              ? "desc"
+                              : "asc",
+                        },
+                      }}
+                      active={sort === "name"}
+                      direction={direction}
+                    >
+                      Başvuru
+                    </TableSortLink>
+                  </TableHead>
+                  <TableHead>
+                    <TableSortLink
+                      href={{
+                        pathname: "/on-kayitlar",
+                        query: {
+                          ...filterParams,
+                          sort: "course",
+                          direction:
+                            sort === "course" && direction === "asc"
+                              ? "desc"
+                              : "asc",
+                        },
+                      }}
+                      active={sort === "course"}
+                      direction={direction}
+                    >
+                      Ders
+                    </TableSortLink>
+                  </TableHead>
                   <TableHead>Kaynak</TableHead>
-                  <TableHead>Durum</TableHead>
-                  <TableHead>Alınma</TableHead>
+                  <TableHead>
+                    <TableSortLink
+                      href={{
+                        pathname: "/on-kayitlar",
+                        query: {
+                          ...filterParams,
+                          sort: "status",
+                          direction:
+                            sort === "status" && direction === "asc"
+                              ? "desc"
+                              : "asc",
+                        },
+                      }}
+                      active={sort === "status"}
+                      direction={direction}
+                    >
+                      Durum
+                    </TableSortLink>
+                  </TableHead>
+                  <TableHead>
+                    <TableSortLink
+                      href={{
+                        pathname: "/on-kayitlar",
+                        query: {
+                          ...filterParams,
+                          sort: "received",
+                          direction:
+                            sort === "received" && direction === "asc"
+                              ? "desc"
+                              : "asc",
+                        },
+                      }}
+                      active={sort === "received"}
+                      direction={direction}
+                    >
+                      Alınma
+                    </TableSortLink>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
