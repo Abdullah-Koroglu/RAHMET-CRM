@@ -33,7 +33,7 @@ export default async function IntegrationsPage({
     .enum(["ACTIVE", "PAUSED", "ERROR", "ARCHIVED"])
     .safeParse(single(params.status));
   const sort = z
-    .enum(["course", "status", "success"])
+    .enum(["course", "mode", "status", "retry", "success"])
     .catch("success")
     .parse(single(params.sort));
   const direction = z
@@ -49,8 +49,12 @@ export default async function IntegrationsPage({
     orderBy:
       sort === "course"
         ? { course: { name: direction } }
+        : sort === "mode"
+          ? { accessMode: direction }
         : sort === "status"
           ? { status: direction }
+          : sort === "retry"
+            ? { retryAttemptCount: direction }
           : { lastSuccessAt: direction },
   });
   const origin =
@@ -117,7 +121,23 @@ export default async function IntegrationsPage({
                     Ders
                   </TableSortLink>
                 </TableHead>
-                <TableHead>Mod</TableHead>
+                <TableHead>
+                  <TableSortLink
+                    href={{
+                      pathname: "/entegrasyonlar",
+                      query: {
+                        q,
+                        status: status.success ? status.data : "ALL",
+                        sort: "mode",
+                        direction: sort === "mode" && direction === "asc" ? "desc" : "asc",
+                      },
+                    }}
+                    active={sort === "mode"}
+                    direction={direction}
+                  >
+                    Mod
+                  </TableSortLink>
+                </TableHead>
                 <TableHead>
                   <TableSortLink
                     href={{
@@ -139,7 +159,23 @@ export default async function IntegrationsPage({
                   </TableSortLink>
                 </TableHead>
                 <TableHead>Webhook URL</TableHead>
-                <TableHead>Retry</TableHead>
+                <TableHead>
+                  <TableSortLink
+                    href={{
+                      pathname: "/entegrasyonlar",
+                      query: {
+                        q,
+                        status: status.success ? status.data : "ALL",
+                        sort: "retry",
+                        direction: sort === "retry" && direction === "asc" ? "desc" : "asc",
+                      },
+                    }}
+                    active={sort === "retry"}
+                    direction={direction}
+                  >
+                    Retry
+                  </TableSortLink>
+                </TableHead>
                 <TableHead>
                   <TableSortLink
                     href={{

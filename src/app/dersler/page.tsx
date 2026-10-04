@@ -32,21 +32,43 @@ export default async function CoursesPage({
   const user = await getCurrentUser();
   const params = await searchParams;
   const q = boundedQuery(params.q);
-  const sort = z.enum(["name", "fee"]).catch("name").parse(single(params.sort));
+  const academicYearId = z.string().uuid().safeParse(single(params.academicYearId));
+  const teacherId = z.string().uuid().safeParse(single(params.teacherId));
+  const sourceStatus = z
+    .enum(["ACTIVE", "PAUSED", "ERROR", "ARCHIVED"])
+    .safeParse(single(params.sourceStatus));
+  const sort = z
+    .enum(["name", "year", "teacher", "fee", "source", "registrations"])
+    .catch("name")
+    .parse(single(params.sort));
   const direction = z
     .enum(["asc", "desc"])
     .catch("asc")
     .parse(single(params.direction));
   const courses = await db.course.findMany({
-    where: q
-      ? {
-          OR: [
-            { name: { contains: q, mode: "insensitive" } },
-            { teacher: { firstName: { contains: q, mode: "insensitive" } } },
-            { teacher: { lastName: { contains: q, mode: "insensitive" } } },
-          ],
-        }
-      : {},
+    where: {
+      ...(academicYearId.success ? { academicYearId: academicYearId.data } : {}),
+      ...(teacherId.success ? { teacherId: teacherId.data } : {}),
+      ...(sourceStatus.success
+        ? {
+            sources: {
+              some: {
+                provider: { not: "MANUAL" },
+                status: sourceStatus.data,
+              },
+            },
+          }
+        : {}),
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: "insensitive" } },
+              { teacher: { firstName: { contains: q, mode: "insensitive" } } },
+              { teacher: { lastName: { contains: q, mode: "insensitive" } } },
+            ],
+          }
+        : {}),
+    },
     include: {
       academicYear: true,
       teacher: true,
@@ -58,8 +80,40 @@ export default async function CoursesPage({
       _count: { select: { enrollments: true, preRegistrations: true } },
     },
     orderBy:
-      sort === "fee" ? { studentFeeAmount: direction } : { name: direction },
+      sort === "fee"
+        ? { studentFeeAmount: direction }
+        : sort === "year"
+          ? { academicYear: { displayName: direction } }
+          : sort === "teacher"
+            ? { teacher: { firstName: direction } }
+            : { name: direction },
   });
+  const [years, teachers] = await Promise.all([
+    db.academicYear.findMany({ orderBy: { startDate: "desc" } }),
+    db.teacher.findMany({ where: { isActive: true }, orderBy: { firstName: "asc" } }),
+  ]);
+  const displayedCourses =
+    sort === "source" || sort === "registrations"
+      ? [...courses].sort((left, right) => {
+          const multiplier = direction === "asc" ? 1 : -1;
+          if (sort === "source") {
+            return multiplier * (left.sources[0]?.status ?? "UNBOUND").localeCompare(
+              right.sources[0]?.status ?? "UNBOUND",
+            );
+          }
+          const leftCount = left._count.enrollments + left._count.preRegistrations;
+          const rightCount = right._count.enrollments + right._count.preRegistrations;
+          return multiplier * (leftCount - rightCount);
+        })
+      : courses;
+  const filterParams = {
+    q,
+    academicYearId: academicYearId.success ? academicYearId.data : "ALL",
+    teacherId: teacherId.success ? teacherId.data : "ALL",
+    sourceStatus: sourceStatus.success ? sourceStatus.data : "ALL",
+    sort,
+    direction,
+  };
   return (
     <div className="space-y-6">
       <PageHeader
@@ -76,8 +130,8 @@ export default async function CoursesPage({
       />
       <Card>
         <CardContent className="pt-6">
-          <form className="mb-5 flex max-w-xl items-end gap-2">
-            <div className="flex-1 space-y-2">
+          <form className="mb-5 grid gap-3 lg:grid-cols-[1fr_190px_190px_180px_auto] lg:items-end">
+            <div className="space-y-2">
               <Label htmlFor="course-search">Ders veya eğitmen ara</Label>
               <Input
                 id="course-search"
@@ -85,6 +139,30 @@ export default async function CoursesPage({
                 defaultValue={q}
                 maxLength={100}
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="course-year">Dönem</Label>
+              <select id="course-year" name="academicYearId" defaultValue={academicYearId.success ? academicYearId.data : "ALL"} className="h-8 w-full rounded-lg border bg-transparent px-2 text-sm">
+                <option value="ALL">Tüm dönemler</option>
+                {years.map((year) => <option key={year.id} value={year.id}>{year.displayName}</option>)}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="course-teacher">Eğitmen</Label>
+              <select id="course-teacher" name="teacherId" defaultValue={teacherId.success ? teacherId.data : "ALL"} className="h-8 w-full rounded-lg border bg-transparent px-2 text-sm">
+                <option value="ALL">Tüm eğitmenler</option>
+                {teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.firstName} {teacher.lastName}</option>)}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="course-source-status">Kaynak durumu</Label>
+              <select id="course-source-status" name="sourceStatus" defaultValue={sourceStatus.success ? sourceStatus.data : "ALL"} className="h-8 w-full rounded-lg border bg-transparent px-2 text-sm">
+                <option value="ALL">Tüm durumlar</option>
+                <option value="ACTIVE">Aktif</option>
+                <option value="PAUSED">Duraklatıldı</option>
+                <option value="ERROR">Hata</option>
+                <option value="ARCHIVED">Arşiv</option>
+              </select>
             </div>
             <Button type="submit">Filtrele</Button>
           </form>
@@ -96,7 +174,7 @@ export default async function CoursesPage({
                     href={{
                       pathname: "/dersler",
                       query: {
-                        q,
+                        ...filterParams,
                         sort: "name",
                         direction:
                           sort === "name" && direction === "asc"
@@ -110,14 +188,18 @@ export default async function CoursesPage({
                     Ders
                   </TableSortLink>
                 </TableHead>
-                <TableHead>Dönem</TableHead>
-                <TableHead>Eğitmen</TableHead>
+                <TableHead>
+                  <TableSortLink href={{ pathname: "/dersler", query: { ...filterParams, sort: "year", direction: sort === "year" && direction === "asc" ? "desc" : "asc" } }} active={sort === "year"} direction={direction}>Dönem</TableSortLink>
+                </TableHead>
+                <TableHead>
+                  <TableSortLink href={{ pathname: "/dersler", query: { ...filterParams, sort: "teacher", direction: sort === "teacher" && direction === "asc" ? "desc" : "asc" } }} active={sort === "teacher"} direction={direction}>Eğitmen</TableSortLink>
+                </TableHead>
                 <TableHead>
                   <TableSortLink
                     href={{
                       pathname: "/dersler",
                       query: {
-                        q,
+                        ...filterParams,
                         sort: "fee",
                         direction:
                           sort === "fee" && direction === "asc"
@@ -131,12 +213,16 @@ export default async function CoursesPage({
                     Ücret
                   </TableSortLink>
                 </TableHead>
-                <TableHead>Kaynak</TableHead>
-                <TableHead>Kayıtlar</TableHead>
+                <TableHead>
+                  <TableSortLink href={{ pathname: "/dersler", query: { ...filterParams, sort: "source", direction: sort === "source" && direction === "asc" ? "desc" : "asc" } }} active={sort === "source"} direction={direction}>Kaynak</TableSortLink>
+                </TableHead>
+                <TableHead>
+                  <TableSortLink href={{ pathname: "/dersler", query: { ...filterParams, sort: "registrations", direction: sort === "registrations" && direction === "asc" ? "desc" : "asc" } }} active={sort === "registrations"} direction={direction}>Kayıtlar</TableSortLink>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {courses.map((course) => {
+              {displayedCourses.map((course) => {
                 const source = course.sources[0];
                 return (
                   <TableRow key={course.id}>

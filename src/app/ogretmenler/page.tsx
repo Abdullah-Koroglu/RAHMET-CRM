@@ -40,7 +40,7 @@ export default async function TeachersPage({
     .enum(["INTERNAL", "EXTERNAL"])
     .safeParse(single(params.type));
   const sort = z
-    .enum(["name", "type"])
+    .enum(["name", "type", "phone", "courses"])
     .catch("name")
     .parse(single(params.sort));
   const direction = z
@@ -66,8 +66,24 @@ export default async function TeachersPage({
     orderBy:
       sort === "type"
         ? { employmentType: direction }
-        : { firstName: direction },
+        : sort === "phone"
+          ? { phone: direction }
+          : { firstName: direction },
   });
+  const displayedTeachers =
+    sort === "courses"
+      ? [...teachers].sort(
+          (left, right) =>
+            (direction === "asc" ? 1 : -1) *
+            (left._count.courses - right._count.courses),
+        )
+      : teachers;
+  const filterParams = {
+    q,
+    type: employmentType.success ? employmentType.data : "ALL",
+    sort,
+    direction,
+  };
   return (
     <div className="space-y-6">
       <PageHeader
@@ -107,10 +123,7 @@ export default async function TeachersPage({
                       href={{
                         pathname: "/ogretmenler",
                         query: {
-                          q,
-                          type: employmentType.success
-                            ? employmentType.data
-                            : "ALL",
+                          ...filterParams,
                           sort: "name",
                           direction:
                             sort === "name" && direction === "asc"
@@ -129,10 +142,7 @@ export default async function TeachersPage({
                       href={{
                         pathname: "/ogretmenler",
                         query: {
-                          q,
-                          type: employmentType.success
-                            ? employmentType.data
-                            : "ALL",
+                          ...filterParams,
                           sort: "type",
                           direction:
                             sort === "type" && direction === "asc"
@@ -146,12 +156,42 @@ export default async function TeachersPage({
                       Tür
                     </TableSortLink>
                   </TableHead>
-                  <TableHead>Telefon</TableHead>
-                  <TableHead>Ders</TableHead>
+                  <TableHead>
+                    <TableSortLink
+                      href={{
+                        pathname: "/ogretmenler",
+                        query: {
+                          ...filterParams,
+                          sort: "phone",
+                          direction: sort === "phone" && direction === "asc" ? "desc" : "asc",
+                        },
+                      }}
+                      active={sort === "phone"}
+                      direction={direction}
+                    >
+                      Telefon
+                    </TableSortLink>
+                  </TableHead>
+                  <TableHead>
+                    <TableSortLink
+                      href={{
+                        pathname: "/ogretmenler",
+                        query: {
+                          ...filterParams,
+                          sort: "courses",
+                          direction: sort === "courses" && direction === "asc" ? "desc" : "asc",
+                        },
+                      }}
+                      active={sort === "courses"}
+                      direction={direction}
+                    >
+                      Ders
+                    </TableSortLink>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {teachers.map((teacher) => (
+                {displayedTeachers.map((teacher) => (
                   <TableRow key={teacher.id}>
                     <TableCell className="font-medium">
                       {teacher.firstName} {teacher.lastName}

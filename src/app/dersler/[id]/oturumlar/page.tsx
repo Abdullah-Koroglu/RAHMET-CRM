@@ -8,6 +8,7 @@ import {
 } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
 import { AttendanceResultsDialog } from "@/components/attendance-results-dialog";
+import { TableSortLink } from "@/components/table-sort-link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -25,15 +26,30 @@ import { StatusBadge } from "@/components/status-badge";
 import { canMutateOperations, getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatDate, formatMoney } from "@/lib/format";
+import { single } from "@/lib/query";
 
 export const dynamic = "force-dynamic";
 
 export default async function LessonSessionsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await getCurrentUser();
+  const query = await searchParams;
+  const statusFilter = z
+    .enum(["PLANNED", "COMPLETED", "CANCELLED"])
+    .safeParse(single(query.status));
+  const sort = z
+    .enum(["date", "status", "attendance"])
+    .catch("date")
+    .parse(single(query.sort));
+  const direction = z
+    .enum(["asc", "desc"])
+    .catch("desc")
+    .parse(single(query.direction));
   const parsed = z
     .string()
     .uuid()
@@ -64,6 +80,16 @@ export default async function LessonSessionsPage({
   const attendanceSession = course.lessonSessions.find(
     (session) => session.status !== "CANCELLED",
   );
+  const displayedSessions = course.lessonSessions
+    .filter((session) => !statusFilter.success || session.status === statusFilter.data)
+    .sort((left, right) => {
+      const multiplier = direction === "asc" ? 1 : -1;
+      if (sort === "date") {
+        return multiplier * (left.sessionDate.getTime() - right.sessionDate.getTime());
+      }
+      if (sort === "status") return multiplier * left.status.localeCompare(right.status);
+      return multiplier * (left.attendances.length - right.attendances.length);
+    });
   return (
     <div className="space-y-6">
       <PageHeader
@@ -102,17 +128,56 @@ export default async function LessonSessionsPage({
             <CardTitle>Oturum geçmişi</CardTitle>
           </CardHeader>
           <CardContent>
+            <form className="mb-5 flex flex-wrap items-end gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="session-status">Durum</Label>
+                <select
+                  id="session-status"
+                  name="status"
+                  defaultValue={statusFilter.success ? statusFilter.data : "ALL"}
+                  className="h-8 min-w-40 rounded-lg border bg-transparent px-2 text-sm"
+                >
+                  <option value="ALL">Tümü</option>
+                  <option value="PLANNED">Planlandı</option>
+                  <option value="COMPLETED">Gerçekleşti</option>
+                  <option value="CANCELLED">İptal</option>
+                </select>
+              </div>
+              <Button type="submit">Filtrele</Button>
+            </form>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Tarih</TableHead>
-                  <TableHead>Durum</TableHead>
-                  <TableHead>Yoklama</TableHead>
+                  {[
+                    ["date", "Tarih"],
+                    ["status", "Durum"],
+                    ["attendance", "Yoklama"],
+                  ].map(([value, label]) => (
+                    <TableHead key={value}>
+                      <TableSortLink
+                        href={{
+                          pathname: `/dersler/${course.id}/oturumlar`,
+                          query: {
+                            status: statusFilter.success ? statusFilter.data : "ALL",
+                            sort: value,
+                            direction:
+                              sort === value && direction === "asc"
+                                ? "desc"
+                                : "asc",
+                          },
+                        }}
+                        active={sort === value}
+                        direction={direction}
+                      >
+                        {label}
+                      </TableSortLink>
+                    </TableHead>
+                  ))}
                   <TableHead className="text-right">İşlem</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {course.lessonSessions.map((session) => (
+                {displayedSessions.map((session) => (
                   <TableRow key={session.id}>
                     <TableCell>{formatDate(session.sessionDate)}</TableCell>
                     <TableCell>
@@ -165,9 +230,9 @@ export default async function LessonSessionsPage({
                 ))}
               </TableBody>
             </Table>
-            {!course.lessonSessions.length ? (
+            {!displayedSessions.length ? (
               <p className="py-6 text-center text-sm text-muted-foreground">
-                Henüz oturum planlanmadı.
+                Seçilen filtrelere uygun oturum bulunamadı.
               </p>
             ) : null}
           </CardContent>

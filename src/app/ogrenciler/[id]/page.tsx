@@ -17,18 +17,56 @@ import {
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
+import { TableSortLink } from "@/components/table-sort-link";
 import { canMutateOperations, getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatDate, formatMoney } from "@/lib/format";
+import { single } from "@/lib/query";
 
 export const dynamic = "force-dynamic";
 
 export default async function StudentDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await getCurrentUser();
+  const query = await searchParams;
+  const enrollmentStatus = z
+    .enum(["ACTIVE", "COMPLETED", "CANCELLED"])
+    .safeParse(single(query.enrollmentStatus));
+  const enrollmentSort = z
+    .enum(["course", "status", "fee", "sessions"])
+    .catch("course")
+    .parse(single(query.enrollmentSort));
+  const enrollmentDirection = z
+    .enum(["asc", "desc"])
+    .catch("asc")
+    .parse(single(query.enrollmentDirection));
+  const attendanceStatus = z
+    .enum(["PRESENT", "ABSENT"])
+    .safeParse(single(query.attendanceStatus));
+  const attendanceSort = z
+    .enum(["course", "date", "status"])
+    .catch("date")
+    .parse(single(query.attendanceSort));
+  const attendanceDirection = z
+    .enum(["asc", "desc"])
+    .catch("desc")
+    .parse(single(query.attendanceDirection));
+  const entryType = z
+    .enum(["PAYMENT", "SESSION_CHARGE", "SESSION_REVERSAL"])
+    .safeParse(single(query.entryType));
+  const entrySort = z
+    .enum(["date", "description", "amount"])
+    .catch("date")
+    .parse(single(query.entrySort));
+  const entryDirection = z
+    .enum(["asc", "desc"])
+    .catch("desc")
+    .parse(single(query.entryDirection));
   const route = z
     .string()
     .uuid()
@@ -58,6 +96,65 @@ export default async function StudentDetailPage({
     new Prisma.Decimal(0),
   );
   const today = new Date().toISOString().slice(0, 10);
+  const displayedEnrollments = student.enrollments
+    .filter(
+      (enrollment) =>
+        !enrollmentStatus.success || enrollment.status === enrollmentStatus.data,
+    )
+    .sort((left, right) => {
+      const multiplier = enrollmentDirection === "asc" ? 1 : -1;
+      if (enrollmentSort === "course") {
+        return multiplier * left.course.name.localeCompare(right.course.name, "tr");
+      }
+      if (enrollmentSort === "status") {
+        return multiplier * left.status.localeCompare(right.status);
+      }
+      if (enrollmentSort === "fee") {
+        return multiplier * left.agreedFeeAmount.comparedTo(right.agreedFeeAmount);
+      }
+      return multiplier * (left.monthlySessionCount - right.monthlySessionCount);
+    });
+  const attendanceRows = student.enrollments
+    .flatMap((enrollment) =>
+      enrollment.attendances.map((attendance) => ({ attendance, enrollment })),
+    )
+    .filter(
+      ({ attendance }) =>
+        !attendanceStatus.success || attendance.status === attendanceStatus.data,
+    )
+    .sort((left, right) => {
+      const multiplier = attendanceDirection === "asc" ? 1 : -1;
+      if (attendanceSort === "course") {
+        return multiplier * left.enrollment.course.name.localeCompare(
+          right.enrollment.course.name,
+          "tr",
+        );
+      }
+      if (attendanceSort === "status") {
+        return multiplier * left.attendance.status.localeCompare(right.attendance.status);
+      }
+      return (
+        multiplier *
+        (left.attendance.lessonSession.sessionDate.getTime() -
+          right.attendance.lessonSession.sessionDate.getTime())
+      );
+    });
+  const displayedEntries = student.accountEntries
+    .filter((entry) => !entryType.success || entry.entryType === entryType.data)
+    .sort((left, right) => {
+      const multiplier = entryDirection === "asc" ? 1 : -1;
+      if (entrySort === "amount") {
+        return multiplier * left.amount.comparedTo(right.amount);
+      }
+      if (entrySort === "description") {
+        const label = (entry: (typeof student.accountEntries)[number]) =>
+          entry.entryType === "PAYMENT"
+            ? "Ödeme"
+            : `${entry.enrollment?.course.name ?? "Ders"} · ${entry.entryType}`;
+        return multiplier * label(left).localeCompare(label(right), "tr");
+      }
+      return multiplier * (left.occurredOn.getTime() - right.occurredOn.getTime());
+    });
   return (
     <div className="space-y-6">
       <PageHeader
@@ -85,17 +182,58 @@ export default async function StudentDetailPage({
             <CardTitle>Ders kayıtları</CardTitle>
           </CardHeader>
           <CardContent>
+            <form className="mb-5 flex flex-wrap items-end gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="enrollment-status">Durum</Label>
+                <select
+                  id="enrollment-status"
+                  name="enrollmentStatus"
+                  defaultValue={enrollmentStatus.success ? enrollmentStatus.data : "ALL"}
+                  className="h-8 min-w-40 rounded-lg border bg-transparent px-2 text-sm"
+                >
+                  <option value="ALL">Tümü</option>
+                  <option value="ACTIVE">Aktif</option>
+                  <option value="COMPLETED">Tamamlandı</option>
+                  <option value="CANCELLED">İptal</option>
+                </select>
+              </div>
+              <Button type="submit">Filtrele</Button>
+            </form>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Ders</TableHead>
-                  <TableHead>Durum</TableHead>
-                  <TableHead>Aylık ücret</TableHead>
-                  <TableHead>Oturum</TableHead>
+                  {[
+                    ["course", "Ders"],
+                    ["status", "Durum"],
+                    ["fee", "Aylık ücret"],
+                    ["sessions", "Oturum"],
+                  ].map(([value, label]) => (
+                    <TableHead key={value}>
+                      <TableSortLink
+                        href={{
+                          pathname: `/ogrenciler/${student.id}`,
+                          query: {
+                            enrollmentStatus: enrollmentStatus.success
+                              ? enrollmentStatus.data
+                              : "ALL",
+                            enrollmentSort: value,
+                            enrollmentDirection:
+                              enrollmentSort === value && enrollmentDirection === "asc"
+                                ? "desc"
+                                : "asc",
+                          },
+                        }}
+                        active={enrollmentSort === value}
+                        direction={enrollmentDirection}
+                      >
+                        {label}
+                      </TableSortLink>
+                    </TableHead>
+                  ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {student.enrollments.map((enrollment) => (
+                {displayedEnrollments.map((enrollment) => (
                   <TableRow key={enrollment.id}>
                     <TableCell>{enrollment.course.name}</TableCell>
                     <TableCell>
@@ -117,17 +255,56 @@ export default async function StudentDetailPage({
           <CardTitle>Yoklama geçmişi</CardTitle>
         </CardHeader>
         <CardContent>
+          <form className="mb-5 flex flex-wrap items-end gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="attendance-status">Sonuç</Label>
+              <select
+                id="attendance-status"
+                name="attendanceStatus"
+                defaultValue={attendanceStatus.success ? attendanceStatus.data : "ALL"}
+                className="h-8 min-w-40 rounded-lg border bg-transparent px-2 text-sm"
+              >
+                <option value="ALL">Tümü</option>
+                <option value="PRESENT">Katıldı</option>
+                <option value="ABSENT">Katılmadı</option>
+              </select>
+            </div>
+            <Button type="submit">Filtrele</Button>
+          </form>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Ders</TableHead>
-                <TableHead>Oturum tarihi</TableHead>
-                <TableHead>Sonuç</TableHead>
+                {[
+                  ["course", "Ders"],
+                  ["date", "Oturum tarihi"],
+                  ["status", "Sonuç"],
+                ].map(([value, label]) => (
+                  <TableHead key={value}>
+                    <TableSortLink
+                      href={{
+                        pathname: `/ogrenciler/${student.id}`,
+                        query: {
+                          attendanceStatus: attendanceStatus.success
+                            ? attendanceStatus.data
+                            : "ALL",
+                          attendanceSort: value,
+                          attendanceDirection:
+                            attendanceSort === value && attendanceDirection === "asc"
+                              ? "desc"
+                              : "asc",
+                        },
+                      }}
+                      active={attendanceSort === value}
+                      direction={attendanceDirection}
+                    >
+                      {label}
+                    </TableSortLink>
+                  </TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {student.enrollments.flatMap((enrollment) =>
-                enrollment.attendances.map((attendance) => (
+              {attendanceRows.map(({ attendance, enrollment }) => (
                   <TableRow key={attendance.id}>
                     <TableCell>{enrollment.course.name}</TableCell>
                     <TableCell>
@@ -137,8 +314,7 @@ export default async function StudentDetailPage({
                       <StatusBadge status={attendance.status} />
                     </TableCell>
                   </TableRow>
-                )),
-              )}
+              ))}
             </TableBody>
           </Table>
           {student.enrollments.every(
@@ -208,16 +384,58 @@ export default async function StudentDetailPage({
             <CardTitle>Hesap hareketleri</CardTitle>
           </CardHeader>
           <CardContent>
+            <form className="mb-5 flex flex-wrap items-end gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="entry-type">Hareket türü</Label>
+                <select
+                  id="entry-type"
+                  name="entryType"
+                  defaultValue={entryType.success ? entryType.data : "ALL"}
+                  className="h-8 min-w-40 rounded-lg border bg-transparent px-2 text-sm"
+                >
+                  <option value="ALL">Tümü</option>
+                  <option value="PAYMENT">Ödeme</option>
+                  <option value="SESSION_CHARGE">Oturum borcu</option>
+                  <option value="SESSION_REVERSAL">Oturum iptali</option>
+                </select>
+              </div>
+              <Button type="submit">Filtrele</Button>
+            </form>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Tarih</TableHead>
-                  <TableHead>Açıklama</TableHead>
-                  <TableHead className="text-right">Tutar</TableHead>
+                  {[
+                    ["date", "Tarih"],
+                    ["description", "Açıklama"],
+                    ["amount", "Tutar"],
+                  ].map(([value, label]) => (
+                    <TableHead
+                      key={value}
+                      className={value === "amount" ? "text-right" : undefined}
+                    >
+                      <TableSortLink
+                        href={{
+                          pathname: `/ogrenciler/${student.id}`,
+                          query: {
+                            entryType: entryType.success ? entryType.data : "ALL",
+                            entrySort: value,
+                            entryDirection:
+                              entrySort === value && entryDirection === "asc"
+                                ? "desc"
+                                : "asc",
+                          },
+                        }}
+                        active={entrySort === value}
+                        direction={entryDirection}
+                      >
+                        {label}
+                      </TableSortLink>
+                    </TableHead>
+                  ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {student.accountEntries.map((entry) => (
+                {displayedEntries.map((entry) => (
                   <TableRow key={entry.id}>
                     <TableCell>{formatDate(entry.occurredOn)}</TableCell>
                     <TableCell>

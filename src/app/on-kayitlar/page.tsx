@@ -62,7 +62,7 @@ export default async function PreRegistrationsPage({
   const courseId = parsedCourse.success ? parsedCourse.data : undefined;
   const parsedSelected = z.string().uuid().safeParse(single(params.selected));
   const sort = z
-    .enum(["name", "course", "status", "received"])
+    .enum(["name", "course", "source", "status", "received"])
     .catch("received")
     .parse(single(params.sort));
   const direction = z
@@ -93,6 +93,8 @@ export default async function PreRegistrationsPage({
           ? { fullName: direction }
           : sort === "course"
             ? { course: { name: direction } }
+            : sort === "source"
+              ? { source: { sheetName: direction } }
             : sort === "status"
               ? { status: direction }
               : { receivedAt: direction },
@@ -231,7 +233,25 @@ export default async function PreRegistrationsPage({
                       Ders
                     </TableSortLink>
                   </TableHead>
-                  <TableHead>Kaynak</TableHead>
+                  <TableHead>
+                    <TableSortLink
+                      href={{
+                        pathname: "/on-kayitlar",
+                        query: {
+                          ...filterParams,
+                          sort: "source",
+                          direction:
+                            sort === "source" && direction === "asc"
+                              ? "desc"
+                              : "asc",
+                        },
+                      }}
+                      active={sort === "source"}
+                      direction={direction}
+                    >
+                      Kaynak
+                    </TableSortLink>
+                  </TableHead>
                   <TableHead>
                     <TableSortLink
                       href={{

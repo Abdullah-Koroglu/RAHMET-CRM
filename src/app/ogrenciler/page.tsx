@@ -17,6 +17,7 @@ import {
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { boundedQuery, pagination, single } from "@/lib/query";
+import { TableSortLink } from "@/components/table-sort-link";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export default async function StudentsPage({
   const q = boundedQuery(params.q);
   const courseId = z.string().uuid().safeParse(single(params.courseId));
   const sort = z
-    .enum(["name", "district"])
+    .enum(["name", "phone", "district", "courses"])
     .catch("name")
     .parse(single(params.sort));
   const direction = z
@@ -59,7 +60,9 @@ export default async function StudentsPage({
       orderBy:
         sort === "district"
           ? [{ district: direction }, { firstName: "asc" }]
-          : [{ firstName: direction }, { lastName: direction }],
+          : sort === "phone"
+            ? [{ phone: direction }, { firstName: "asc" }]
+            : [{ firstName: direction }, { lastName: direction }],
       skip,
       take: pageSize,
     }),
@@ -69,6 +72,26 @@ export default async function StudentsPage({
       orderBy: { name: "asc" },
     }),
   ]);
+  const displayedStudents =
+    sort === "courses"
+      ? [...students].sort((left, right) => {
+          const leftCourses = left.enrollments
+            .map((enrollment) => enrollment.course.name)
+            .sort((a, b) => a.localeCompare(b, "tr"))
+            .join(", ");
+          const rightCourses = right.enrollments
+            .map((enrollment) => enrollment.course.name)
+            .sort((a, b) => a.localeCompare(b, "tr"))
+            .join(", ");
+          return (direction === "asc" ? 1 : -1) * leftCourses.localeCompare(rightCourses, "tr");
+        })
+      : students;
+  const filterParams = {
+    q,
+    courseId: courseId.success ? courseId.data : "ALL",
+    sort,
+    direction,
+  };
   return (
     <div className="space-y-6">
       <PageHeader
@@ -109,12 +132,11 @@ export default async function StudentsPage({
             <TableHeader>
               <TableRow>
                 <TableHead>
-                  <Link
+                  <TableSortLink
                     href={{
                       pathname: "/ogrenciler",
                       query: {
-                        q,
-                        courseId: courseId.success ? courseId.data : "ALL",
+                        ...filterParams,
                         sort: "name",
                         direction:
                           sort === "name" && direction === "asc"
@@ -122,20 +144,34 @@ export default async function StudentsPage({
                             : "asc",
                       },
                     }}
-                    className="hover:underline"
+                    active={sort === "name"}
+                    direction={direction}
                   >
-                    Öğrenci{" "}
-                    {sort === "name" ? (direction === "asc" ? "↑" : "↓") : "↕"}
-                  </Link>
+                    Öğrenci
+                  </TableSortLink>
                 </TableHead>
-                <TableHead>Telefon</TableHead>
                 <TableHead>
-                  <Link
+                  <TableSortLink
                     href={{
                       pathname: "/ogrenciler",
                       query: {
-                        q,
-                        courseId: courseId.success ? courseId.data : "ALL",
+                        ...filterParams,
+                        sort: "phone",
+                        direction: sort === "phone" && direction === "asc" ? "desc" : "asc",
+                      },
+                    }}
+                    active={sort === "phone"}
+                    direction={direction}
+                  >
+                    Telefon
+                  </TableSortLink>
+                </TableHead>
+                <TableHead>
+                  <TableSortLink
+                    href={{
+                      pathname: "/ogrenciler",
+                      query: {
+                        ...filterParams,
                         sort: "district",
                         direction:
                           sort === "district" && direction === "asc"
@@ -143,21 +179,32 @@ export default async function StudentsPage({
                             : "asc",
                       },
                     }}
-                    className="hover:underline"
+                    active={sort === "district"}
+                    direction={direction}
                   >
-                    İlçe{" "}
-                    {sort === "district"
-                      ? direction === "asc"
-                        ? "↑"
-                        : "↓"
-                      : "↕"}
-                  </Link>
+                    İlçe
+                  </TableSortLink>
                 </TableHead>
-                <TableHead>Dersler</TableHead>
+                <TableHead>
+                  <TableSortLink
+                    href={{
+                      pathname: "/ogrenciler",
+                      query: {
+                        ...filterParams,
+                        sort: "courses",
+                        direction: sort === "courses" && direction === "asc" ? "desc" : "asc",
+                      },
+                    }}
+                    active={sort === "courses"}
+                    direction={direction}
+                  >
+                    Dersler
+                  </TableSortLink>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {students.map((student) => (
+              {displayedStudents.map((student) => (
                 <TableRow key={student.id}>
                   <TableCell>
                     <Link
@@ -185,12 +232,7 @@ export default async function StudentsPage({
           ) : null}
           <Pagination
             basePath="/ogrenciler"
-            params={{
-              q,
-              courseId: courseId.success ? courseId.data : "ALL",
-              sort,
-              direction,
-            }}
+            params={filterParams}
             page={page}
             pageSize={pageSize}
             total={total}
