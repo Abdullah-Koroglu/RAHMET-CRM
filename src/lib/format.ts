@@ -9,13 +9,21 @@ export const statusLabels: Record<string, string> = {
   PAUSED: "Duraklatıldı",
   ERROR: "Hata",
   ARCHIVED: "Arşivlendi",
+  PRESENT: "Katıldı",
+  ABSENT: "Katılmadı",
 };
 
 export function formatDate(value: Date | string | null | undefined) {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return new Intl.DateTimeFormat("tr-TR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 export function formatMoney(value: { toString(): string } | number) {
-  return new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(Number(value));
+  return new Intl.NumberFormat("tr-TR", {
+    style: "currency",
+    currency: "TRY",
+  }).format(Number(value));
 }

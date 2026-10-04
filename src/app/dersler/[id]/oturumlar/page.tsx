@@ -102,6 +102,7 @@ export default async function LessonSessionsPage({
                 <TableRow>
                   <TableHead>Tarih</TableHead>
                   <TableHead>Durum</TableHead>
+                  <TableHead>Yoklama</TableHead>
                   <TableHead className="text-right">İşlem</TableHead>
                 </TableRow>
               </TableHeader>
@@ -111,6 +112,11 @@ export default async function LessonSessionsPage({
                     <TableCell>{formatDate(session.sessionDate)}</TableCell>
                     <TableCell>
                       <StatusBadge status={session.status} />
+                    </TableCell>
+                    <TableCell>
+                      {session.attendances.length
+                        ? `${session.attendances.filter((attendance) => attendance.status === "PRESENT").length} katıldı / ${session.attendances.length}`
+                        : "Henüz girilmedi"}
                     </TableCell>
                     <TableCell className="text-right">
                       {session.status === "PLANNED" &&
