@@ -201,19 +201,17 @@ export async function updateCourse(
         select: { monthlySessionCount: true },
       })
     : null;
-  const parsed = courseSchema
-    .extend({ id })
-    .safeParse({
-      id: formValue(formData, "id"),
-      name: formValue(formData, "name"),
-      academicYearId: formValue(formData, "academicYearId"),
-      teacherId: formValue(formData, "teacherId"),
-      studentFeeAmount: formValue(formData, "studentFeeAmount"),
-      monthlySessionCount:
-        formValue(formData, "monthlySessionCount") ||
-        String(current?.monthlySessionCount ?? ""),
-      teacherFeeAmount: formValue(formData, "teacherFeeAmount"),
-    });
+  const parsed = courseSchema.extend({ id }).safeParse({
+    id: formValue(formData, "id"),
+    name: formValue(formData, "name"),
+    academicYearId: formValue(formData, "academicYearId"),
+    teacherId: formValue(formData, "teacherId"),
+    studentFeeAmount: formValue(formData, "studentFeeAmount"),
+    monthlySessionCount:
+      formValue(formData, "monthlySessionCount") ||
+      String(current?.monthlySessionCount ?? ""),
+    teacherFeeAmount: formValue(formData, "teacherFeeAmount"),
+  });
   if (!parsed.success) return invalid();
   try {
     const { user } = await secure(["ADMIN"], async () => null);
@@ -480,12 +478,10 @@ export async function changePreRegistrationStatus(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const parsed = z
-    .object({ id, status: mutableStatuses })
-    .safeParse({
-      id: formValue(formData, "id"),
-      status: formValue(formData, "status"),
-    });
+  const parsed = z.object({ id, status: mutableStatuses }).safeParse({
+    id: formValue(formData, "id"),
+    status: formValue(formData, "status"),
+  });
   if (!parsed.success) return invalid();
   try {
     const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
@@ -531,12 +527,10 @@ export async function addPreRegistrationNote(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const parsed = z
-    .object({ id, note: requiredText(2000) })
-    .safeParse({
-      id: formValue(formData, "id"),
-      note: formValue(formData, "note"),
-    });
+  const parsed = z.object({ id, note: requiredText(2000) }).safeParse({
+    id: formValue(formData, "id"),
+    note: formValue(formData, "note"),
+  });
   if (!parsed.success) return invalid();
   try {
     const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
@@ -679,11 +673,88 @@ const sessionSchema = z.object({
   sessionDate: z.string().date(),
 });
 const sessionIdSchema = z.object({ sessionId: id });
+const attendanceSchema = z.object({
+  sessionId: id,
+  enrollmentIds: z.array(id).max(1000),
+});
 const paymentSchema = z.object({
   studentId: id,
   amount: money,
   paidOn: z.string().date(),
 });
+
+export async function saveBulkAttendance(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = attendanceSchema.safeParse({
+    sessionId: formValue(formData, "sessionId"),
+    enrollmentIds: formData.getAll("presentEnrollmentId").map(String),
+  });
+  if (!parsed.success) return invalid();
+  try {
+    const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
+    const courseId = await db.$transaction(async (tx) => {
+      const session = await tx.lessonSession.findUniqueOrThrow({
+        where: { id: parsed.data.sessionId },
+      });
+      const enrollments = await tx.enrollment.findMany({
+        where: { courseId: session.courseId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      const activeIds = new Set(enrollments.map((enrollment) => enrollment.id));
+      if (
+        parsed.data.enrollmentIds.some(
+          (enrollmentId) => !activeIds.has(enrollmentId),
+        )
+      )
+        throw new Error("ATTENDANCE_ENROLLMENT_INVALID");
+      await Promise.all(
+        enrollments.map((enrollment) =>
+          tx.lessonAttendance.upsert({
+            where: {
+              lessonSessionId_enrollmentId: {
+                lessonSessionId: session.id,
+                enrollmentId: enrollment.id,
+              },
+            },
+            update: {
+              status: parsed.data.enrollmentIds.includes(enrollment.id)
+                ? "PRESENT"
+                : "ABSENT",
+              markedByUserId: user.id,
+              markedAt: new Date(),
+            },
+            create: {
+              lessonSessionId: session.id,
+              enrollmentId: enrollment.id,
+              status: parsed.data.enrollmentIds.includes(enrollment.id)
+                ? "PRESENT"
+                : "ABSENT",
+              markedByUserId: user.id,
+            },
+          }),
+        ),
+      );
+      await writeAudit(
+        tx,
+        user.id,
+        "LESSON_ATTENDANCE_SAVED",
+        "LessonSession",
+        session.id,
+        {
+          presentCount: parsed.data.enrollmentIds.length,
+          totalCount: enrollments.length,
+        },
+      );
+      return session.courseId;
+    });
+    revalidatePath(`/dersler/${courseId}/oturumlar`);
+    return actionSuccess("Yoklama toplu olarak kaydedildi.");
+  } catch (error) {
+    return failed("saveBulkAttendance", error, "Yoklama kaydedilemedi.");
+  }
+}
 
 export async function createLessonSession(
   _state: ActionState,

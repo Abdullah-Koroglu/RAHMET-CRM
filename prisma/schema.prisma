@@ -77,6 +77,13 @@ enum LessonSessionStatus {
   @@schema("rahmet_crm")
 }
 
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+
+  @@schema("rahmet_crm")
+}
+
 enum StudentAccountEntryType {
   PAYMENT
   SESSION_CHARGE
@@ -122,6 +129,7 @@ model AppUser {
   assignedPreRegistrations PreRegistration[]
   activities               PreRegistrationActivity[]
   conversions              PreRegistrationConversion[]
+  markedAttendances        LessonAttendance[]
   sources                  ExternalRegistrationSource[]
   sessions                 UserSession[]
   auditLogs                AuditLog[]
@@ -328,6 +336,7 @@ model Enrollment {
   course          Course                     @relation(fields: [courseId], references: [id])
   conversion      PreRegistrationConversion?
   accountEntries  StudentAccountEntry[]
+  attendances     LessonAttendance[]
 
   @@unique([studentId, courseId])
   @@map("enrollment")
@@ -341,12 +350,30 @@ model LessonSession {
   status          LessonSessionStatus @default(PLANNED)
   course          Course              @relation(fields: [courseId], references: [id], onDelete: Restrict)
   accountEntries  StudentAccountEntry[]
+  attendances     LessonAttendance[]
   createdAt       DateTime            @default(now()) @map("created_at")
   updatedAt       DateTime            @updatedAt @map("updated_at")
 
   @@unique([courseId, sessionDate])
   @@index([courseId, sessionDate])
   @@map("lesson_session")
+  @@schema("rahmet_crm")
+}
+
+model LessonAttendance {
+  id              String           @id @default(uuid()) @db.Uuid
+  lessonSessionId String           @map("lesson_session_id") @db.Uuid
+  enrollmentId    String           @map("enrollment_id") @db.Uuid
+  status          AttendanceStatus @default(ABSENT)
+  markedByUserId  String           @map("marked_by_user_id") @db.Uuid
+  markedAt        DateTime         @default(now()) @map("marked_at")
+  lessonSession   LessonSession    @relation(fields: [lessonSessionId], references: [id], onDelete: Cascade)
+  enrollment      Enrollment       @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  markedBy        AppUser          @relation(fields: [markedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([lessonSessionId, enrollmentId])
+  @@index([enrollmentId])
+  @@map("lesson_attendance")
   @@schema("rahmet_crm")
 }
 
