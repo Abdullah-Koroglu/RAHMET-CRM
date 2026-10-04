@@ -7,6 +7,7 @@ import {
   saveBulkAttendance,
 } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
+import { AttendanceResultsDialog } from "@/components/attendance-results-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,7 +43,11 @@ export default async function LessonSessionsPage({
     where: { id: parsed.data },
     include: {
       lessonSessions: {
-        include: { attendances: true },
+        include: {
+          attendances: {
+            include: { enrollment: { include: { student: true } } },
+          },
+        },
         orderBy: { sessionDate: "desc" },
       },
       enrollments: {
@@ -119,6 +124,16 @@ export default async function LessonSessionsPage({
                         : "Henüz girilmedi"}
                     </TableCell>
                     <TableCell className="text-right">
+                      {session.attendances.length ? (
+                        <AttendanceResultsDialog
+                          date={formatDate(session.sessionDate)}
+                          entries={session.attendances.map((attendance) => ({
+                            id: attendance.id,
+                            name: `${attendance.enrollment.student.firstName} ${attendance.enrollment.student.lastName}`,
+                            status: attendance.status,
+                          }))}
+                        />
+                      ) : null}
                       {session.status === "PLANNED" &&
                       canMutateOperations(user.role) ? (
                         <ActionForm action={completeLessonSession}>
