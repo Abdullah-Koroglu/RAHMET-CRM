@@ -9,12 +9,15 @@ import { ActionForm } from "@/components/action-form";
 import { ConvertPreRegistrationDialog } from "@/components/convert-pre-registration-dialog";
 import { ManualPreRegistrationDialog } from "@/components/manual-pre-registration-dialog";
 import { TableSortLink } from "@/components/table-sort-link";
+import {
+  TableFilterMenu,
+  TableSearchFilterMenu,
+} from "@/components/table-filter-menu";
 import { PageHeader } from "@/components/page-header";
 import { Pagination } from "@/components/pagination";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -141,54 +144,6 @@ export default async function PreRegistrationsPage({
           <ManualPreRegistrationDialog courses={courses} />
         </div>
       ) : null}
-      <Card>
-        <CardContent className="pt-6">
-          <form className="grid gap-3 md:grid-cols-[1fr_220px_220px_auto] md:items-end">
-            <div className="space-y-2">
-              <Label htmlFor="pre-search">Ad soyad veya telefon</Label>
-              <Input
-                id="pre-search"
-                name="q"
-                defaultValue={q}
-                maxLength={100}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="course-filter">Ders</Label>
-              <Select name="courseId" defaultValue={courseId ?? "ALL"}>
-                <SelectTrigger id="course-filter">
-                  <SelectValue placeholder="Tüm dersler" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">Tüm dersler</SelectItem>
-                  {courses.map((course) => (
-                    <SelectItem key={course.id} value={course.id}>
-                      {course.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="status-filter">Durum</Label>
-              <Select name="status" defaultValue={status ?? "ALL"}>
-                <SelectTrigger id="status-filter">
-                  <SelectValue placeholder="Tüm durumlar" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">Tüm durumlar</SelectItem>
-                  {statuses.map((item) => (
-                    <SelectItem key={item} value={item}>
-                      {statusLabels[item]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button type="submit">Filtrele</Button>
-          </form>
-        </CardContent>
-      </Card>
       <div className="grid gap-6 2xl:grid-cols-[1fr_420px]">
         <Card>
           <CardContent className="pt-6">
@@ -213,6 +168,14 @@ export default async function PreRegistrationsPage({
                     >
                       Başvuru
                     </TableSortLink>
+                    <TableSearchFilterMenu
+                      label="Başvuru"
+                      pathname="/on-kayitlar"
+                      params={filterParams}
+                      param="q"
+                      value={q}
+                      placeholder="Ad soyad veya telefon"
+                    />
                   </TableHead>
                   <TableHead>
                     <TableSortLink
@@ -232,6 +195,17 @@ export default async function PreRegistrationsPage({
                     >
                       Ders
                     </TableSortLink>
+                    <TableFilterMenu
+                      label="Ders"
+                      pathname="/on-kayitlar"
+                      params={filterParams}
+                      param="courseId"
+                      value={courseId ?? "ALL"}
+                      options={[
+                        { label: "Tüm dersler", value: "ALL" },
+                        ...courses.map((course) => ({ label: course.name, value: course.id })),
+                      ]}
+                    />
                   </TableHead>
                   <TableHead>
                     <TableSortLink
@@ -270,6 +244,17 @@ export default async function PreRegistrationsPage({
                     >
                       Durum
                     </TableSortLink>
+                    <TableFilterMenu
+                      label="Durum"
+                      pathname="/on-kayitlar"
+                      params={filterParams}
+                      param="status"
+                      value={status ?? "ALL"}
+                      options={[
+                        { label: "Tüm durumlar", value: "ALL" },
+                        ...statuses.map((item) => ({ label: statusLabels[item], value: item })),
+                      ]}
+                    />
                   </TableHead>
                   <TableHead>
                     <TableSortLink

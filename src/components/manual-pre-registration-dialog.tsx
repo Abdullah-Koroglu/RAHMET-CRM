@@ -28,10 +28,10 @@ export function ManualPreRegistrationDialog({
 }) {
   return (
     <Dialog>
-      <DialogTrigger render={<Button />}>Manuel ön kayıt ekle</DialogTrigger>
+      <DialogTrigger render={<Button />}>Ön kayıt ekle</DialogTrigger>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Manuel ön kayıt</DialogTitle>
+          <DialogTitle>Ön kayıt ekle</DialogTitle>
           <DialogDescription>
             Formdan gelmeyen başvuruyu ekleyin. Kayıt önce “Yeni” durumunda
             oluşturulur.
