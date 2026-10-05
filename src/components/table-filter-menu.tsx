@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Funnel } from "lucide-react";
@@ -31,6 +30,15 @@ export function TableFilterMenu({
   value: string;
   options: FilterOption[];
 }) {
+  const router = useRouter();
+  const selectOption = (option: string) => {
+    const query = new URLSearchParams(
+      Object.entries(params).map(([key, item]) => [key, String(item)]),
+    );
+    query.set(param, option);
+    query.set("page", "1");
+    router.push(`${pathname}?${query.toString()}`);
+  };
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -50,14 +58,7 @@ export function TableFilterMenu({
         {options.map((option) => (
           <DropdownMenuItem
             key={option.value}
-            render={
-              <Link
-                href={{
-                  pathname,
-                  query: { ...params, [param]: option.value, page: "1" },
-                }}
-              />
-            }
+            onClick={() => selectOption(option.value)}
           >
             <span className="flex-1">{option.label}</span>
             {value === option.value ? <span aria-hidden>✓</span> : null}
