@@ -1,208 +1,89 @@
 import Link from "next/link";
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
+import { BulkMonthlyChargeDialog, MonthlyChargeDialog, MonthlyPaymentDialog } from "@/components/monthly-charge-dialog";
 import { PageHeader } from "@/components/page-header";
 import { TableSortLink } from "@/components/table-sort-link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { getCurrentUser } from "@/lib/auth";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { canMutateOperations, getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatMoney } from "@/lib/format";
 import { boundedQuery, single } from "@/lib/query";
-import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 
-export default async function CollectionsPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  await getCurrentUser();
+const monthInput = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+const monthDate = (month: string) => new Date(`${month}-01T00:00:00.000Z`);
+function shiftMonth(month: string, shift: number) {
+  const date = monthDate(month);
+  date.setUTCMonth(date.getUTCMonth() + shift);
+  return date.toISOString().slice(0, 7);
+}
+
+export default async function CollectionsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const user = await getCurrentUser();
   const params = await searchParams;
+  const month = monthInput.catch(new Date().toISOString().slice(0, 7)).parse(single(params.month));
+  const billingMonth = monthDate(month);
   const q = boundedQuery(params.q);
-  const balanceFilter = z
-    .enum(["DEBT", "CREDIT", "ZERO"])
-    .safeParse(single(params.balance));
-  const sort = z
-    .enum(["student", "monthly", "balance", "collect"])
-    .catch("collect")
-    .parse(single(params.sort));
-  const direction = z
-    .enum(["asc", "desc"])
-    .catch("desc")
-    .parse(single(params.direction));
+  const balanceFilter = z.enum(["DEBT", "CREDIT", "ZERO"]).safeParse(single(params.balance));
+  const sort = z.enum(["student", "expected", "paid", "remaining"]).catch("remaining").parse(single(params.sort));
+  const direction = z.enum(["asc", "desc"]).catch("desc").parse(single(params.direction));
   const students = await db.student.findMany({
     where: { isActive: true },
-    include: {
-      enrollments: { where: { status: "ACTIVE" } },
-      accountEntries: true,
-    },
+    include: { monthlyCharges: { where: { billingMonth }, include: { payments: true } } },
     orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
   });
   const rows = students.map((student) => {
-    const monthlyExpected = student.enrollments.reduce(
-      (sum, enrollment) => sum.plus(enrollment.agreedFeeAmount),
-      new Prisma.Decimal(0),
-    );
-    const balance = student.accountEntries.reduce(
-      (sum, entry) => sum.plus(entry.amount),
-      new Prisma.Decimal(0),
-    );
-    const toCollect = Prisma.Decimal.max(
-      new Prisma.Decimal(0),
-      monthlyExpected.minus(balance),
-    );
-    return { ...student, monthlyExpected, balance, toCollect };
+    const charge = student.monthlyCharges[0] ?? null;
+    const expected = charge?.expectedAmount ?? new Prisma.Decimal(0);
+    const paid = charge ? charge.payments.filter((entry) => entry.entryType === "PAYMENT").reduce((sum, entry) => sum.plus(entry.amount), new Prisma.Decimal(0)) : new Prisma.Decimal(0);
+    const remaining = Prisma.Decimal.max(new Prisma.Decimal(0), expected.minus(paid));
+    const credit = Prisma.Decimal.max(new Prisma.Decimal(0), paid.minus(expected));
+    return { ...student, charge, expected, paid, remaining, credit };
   });
-  const filteredRows = rows
-    .filter((row) => {
-      const fullName = `${row.firstName} ${row.lastName}`.toLocaleLowerCase("tr-TR");
-      if (q && !fullName.includes(q.toLocaleLowerCase("tr-TR"))) return false;
-      if (balanceFilter.data === "DEBT") return row.balance.lessThan(0);
-      if (balanceFilter.data === "CREDIT") return row.balance.greaterThan(0);
-      if (balanceFilter.data === "ZERO") return row.balance.equals(0);
-      return true;
-    })
-    .sort((left, right) => {
-      const multiplier = direction === "asc" ? 1 : -1;
-      if (sort === "student") {
-        return multiplier * `${left.firstName} ${left.lastName}`.localeCompare(
-          `${right.firstName} ${right.lastName}`,
-          "tr",
-        );
-      }
-      const field =
-        sort === "monthly"
-          ? "monthlyExpected"
-          : sort === "balance"
-            ? "balance"
-            : "toCollect";
-      return multiplier * left[field].comparedTo(right[field]);
-    });
-  const total = filteredRows.reduce(
-    (sum, row) => sum.plus(row.toCollect),
-    new Prisma.Decimal(0),
-  );
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Tahsilatlar"
-        description="Aktif derslerin aylık ücretleri ve mevcut öğrenci bakiyesine göre tahsil edilmesi gereken tutarlar."
-      />
-      <Card>
-        <CardContent className="pt-6">
-          <div className="mb-5 grid gap-2 rounded-lg border p-4 sm:grid-cols-2">
-            <p className="text-sm text-muted-foreground">
-              Bugün tahsil edilmesi gereken toplam
-            </p>
-            <p className="text-right text-2xl font-semibold">
-              {formatMoney(total)}
-            </p>
-          </div>
-          <form className="mb-5 grid gap-3 sm:grid-cols-[1fr_180px_auto] sm:items-end">
-            <div className="space-y-2">
-              <label htmlFor="collection-search" className="text-sm font-medium">
-                Öğrenci ara
-              </label>
-              <Input id="collection-search" name="q" defaultValue={q} />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="balance-filter" className="text-sm font-medium">
-                Bakiye durumu
-              </label>
-              <select
-                id="balance-filter"
-                name="balance"
-                defaultValue={balanceFilter.success ? balanceFilter.data : "ALL"}
-                className="h-8 w-full rounded-lg border bg-transparent px-2 text-sm"
-              >
-                <option value="ALL">Tümü</option>
-                <option value="DEBT">Borçlu</option>
-                <option value="CREDIT">Alacaklı</option>
-                <option value="ZERO">Bakiyesi sıfır</option>
-              </select>
-            </div>
-            <Button type="submit">Filtrele</Button>
-          </form>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {[
-                  ["student", "Öğrenci"],
-                  ["monthly", "Aylık beklenen"],
-                  ["balance", "Mevcut bakiye"],
-                  ["collect", "Tahsil edilecek"],
-                ].map(([value, label]) => (
-                  <TableHead
-                    key={value}
-                    className={value === "student" ? undefined : "text-right"}
-                  >
-                    <TableSortLink
-                      href={{
-                        pathname: "/tahsilatlar",
-                        query: {
-                          q,
-                          balance: balanceFilter.success ? balanceFilter.data : "ALL",
-                          sort: value,
-                          direction:
-                            sort === value && direction === "asc" ? "desc" : "asc",
-                        },
-                      }}
-                      active={sort === value}
-                      direction={direction}
-                    >
-                      {label}
-                    </TableSortLink>
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredRows.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell>
-                    <Link
-                      className="font-medium hover:underline"
-                      href={`/ogrenciler/${row.id}`}
-                    >
-                      {row.firstName} {row.lastName}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatMoney(row.monthlyExpected)}
-                  </TableCell>
-                  <TableCell
-                    className={
-                      row.balance.greaterThanOrEqualTo(0)
-                        ? "text-right text-emerald-700"
-                        : "text-right text-destructive"
-                    }
-                  >
-                    {formatMoney(row.balance)}
-                  </TableCell>
-                  <TableCell className="text-right font-medium">
-                    {formatMoney(row.toCollect)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {!filteredRows.length ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              Seçilen filtrelere uygun aktif öğrenci bulunamadı.
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
-    </div>
-  );
+  const filteredRows = rows.filter((row) => {
+    const fullName = `${row.firstName} ${row.lastName}`.toLocaleLowerCase("tr-TR");
+    if (q && !fullName.includes(q.toLocaleLowerCase("tr-TR"))) return false;
+    if (balanceFilter.data === "DEBT") return row.remaining.greaterThan(0);
+    if (balanceFilter.data === "CREDIT") return row.credit.greaterThan(0);
+    if (balanceFilter.data === "ZERO") return row.remaining.equals(0) && row.credit.equals(0);
+    return true;
+  }).sort((left, right) => {
+    const multiplier = direction === "asc" ? 1 : -1;
+    if (sort === "student") return multiplier * `${left.firstName} ${left.lastName}`.localeCompare(`${right.firstName} ${right.lastName}`, "tr");
+    return multiplier * left[sort].comparedTo(right[sort]);
+  });
+  const totals = filteredRows.reduce((sum, row) => ({ expected: sum.expected.plus(row.expected), paid: sum.paid.plus(row.paid), remaining: sum.remaining.plus(row.remaining), credit: sum.credit.plus(row.credit) }), { expected: new Prisma.Decimal(0), paid: new Prisma.Decimal(0), remaining: new Prisma.Decimal(0), credit: new Prisma.Decimal(0) });
+  const today = new Date().toISOString().slice(0, 10);
+  const query = { q, balance: balanceFilter.success ? balanceFilter.data : "ALL", month };
+
+  return <div className="space-y-6">
+    <PageHeader title="Tahsilatlar" description="Ders ücretlerinden bağımsız, öğrenci bazlı aylık cari takip. Eski ders/oturum hareketleri bu ay hesabına dahil edilmez." actions={user.role === "ADMIN" ? <BulkMonthlyChargeDialog month={month} /> : undefined} />
+    <Card><CardContent className="pt-6">
+      <form className="mb-5 grid gap-3 sm:grid-cols-[auto_160px_1fr_180px_auto] sm:items-end">
+        <Button variant="outline" render={<Link href={{ pathname: "/tahsilatlar", query: { ...query, month: shiftMonth(month, -1) } }} />}>Önceki ay</Button>
+        <div className="space-y-2"><label htmlFor="collection-month" className="text-sm font-medium">Ay</label><Input id="collection-month" name="month" type="month" defaultValue={month} /></div>
+        <div className="space-y-2"><label htmlFor="collection-search" className="text-sm font-medium">Öğrenci ara</label><Input id="collection-search" name="q" defaultValue={q} /></div>
+        <div className="space-y-2"><label htmlFor="balance-filter" className="text-sm font-medium">Durum</label><select id="balance-filter" name="balance" defaultValue={balanceFilter.success ? balanceFilter.data : "ALL"} className="h-8 w-full rounded-lg border bg-transparent px-2 text-sm"><option value="ALL">Tümü</option><option value="DEBT">Borçlu</option><option value="CREDIT">Fazla ödemeli</option><option value="ZERO">Bakiyesi sıfır</option></select></div>
+        <Button type="submit">Göster</Button>
+      </form>
+      <div className="mb-5 grid gap-3 rounded-lg border p-4 sm:grid-cols-4">
+        <div><p className="text-sm text-muted-foreground">Aylık beklenen</p><p className="text-lg font-semibold">{formatMoney(totals.expected)}</p></div>
+        <div><p className="text-sm text-muted-foreground">Aylık ödenen</p><p className="text-lg font-semibold text-emerald-700">{formatMoney(totals.paid)}</p></div>
+        <div><p className="text-sm text-muted-foreground">Kalan borç</p><p className="text-lg font-semibold text-destructive">{formatMoney(totals.remaining)}</p></div>
+        <div><p className="text-sm text-muted-foreground">Fazla ödeme</p><p className="text-lg font-semibold text-emerald-700">{formatMoney(totals.credit)}</p></div>
+      </div>
+      <Table><TableHeader><TableRow>{[["student", "Öğrenci"], ["expected", "Aylık beklenen"], ["paid", "Aylık ödenen"], ["remaining", "Kalan borç"]].map(([value, label]) => <TableHead key={value} className={value === "student" ? undefined : "text-right"}><TableSortLink href={{ pathname: "/tahsilatlar", query: { ...query, sort: value, direction: sort === value && direction === "asc" ? "desc" : "asc" } }} active={sort === value} direction={direction}>{label}</TableSortLink></TableHead>)}<TableHead className="text-right">İşlem</TableHead></TableRow></TableHeader>
+        <TableBody>{filteredRows.map((row) => <TableRow key={row.id}>
+          <TableCell><Link className="font-medium hover:underline" href={`/ogrenciler/${row.id}`}>{row.firstName} {row.lastName}</Link>{row.credit.greaterThan(0) ? <p className="text-xs text-emerald-700">Fazla ödeme: {formatMoney(row.credit)}</p> : null}</TableCell>
+          <TableCell className="text-right">{formatMoney(row.expected)}</TableCell><TableCell className="text-right text-emerald-700">{formatMoney(row.paid)}</TableCell><TableCell className={row.remaining.greaterThan(0) ? "text-right font-medium text-destructive" : "text-right font-medium"}>{formatMoney(row.remaining)}</TableCell>
+          <TableCell className="text-right"><div className="flex flex-wrap justify-end gap-2">{user.role === "ADMIN" ? <MonthlyChargeDialog studentId={row.id} studentName={`${row.firstName} ${row.lastName}`} month={month} expectedAmount={row.charge?.expectedAmount.toString()} note={row.charge?.note} /> : null}{row.charge && canMutateOperations(user.role) ? <MonthlyPaymentDialog studentId={row.id} studentName={`${row.firstName} ${row.lastName}`} monthlyChargeId={row.charge.id} month={month} today={today} /> : null}</div></TableCell>
+        </TableRow>)}</TableBody></Table>
+      {!filteredRows.length ? <p className="py-8 text-center text-sm text-muted-foreground">Seçilen ay ve filtrelere uygun aktif öğrenci bulunamadı.</p> : null}
+    </CardContent></Card>
+  </div>;
 }

@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
+import { StudentProfileDialog } from "@/components/student-profile-dialog";
 import { TableSortLink } from "@/components/table-sort-link";
 import { canMutateOperations, getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -177,6 +178,11 @@ export default async function StudentDetailPage({
       <PageHeader
         title={`${student.firstName} ${student.lastName}`}
         description="Öğrenci profili, ders kayıtları ve cari hesabı."
+        actions={
+          canMutateOperations(user.role) ? (
+            <StudentProfileDialog student={student} />
+          ) : undefined
+        }
       />
       <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
         <Card>
@@ -191,6 +197,18 @@ export default async function StudentDetailPage({
             <div>
               <p className="text-muted-foreground">İlçe</p>
               <p>{student.district ?? "—"}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Adres</p>
+              <p className="whitespace-pre-wrap">{student.address ?? "—"}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Doğum tarihi</p>
+              <p>{student.birthDate ? formatDate(student.birthDate) : "—"}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Sınıf seviyesi</p>
+              <p>{student.classLevel ?? "—"}</p>
             </div>
           </CardContent>
         </Card>

@@ -70,6 +70,10 @@ Kişisel veri içeren Google Sheet production'da public/published yapılmamalıd
 
 Backup/restore, retention, olay müdahalesi ve rollback adımları `docs/operations.md` dosyasındadır. Scriptler gerçek scheduler veya secret store yapılandırmaz; production ortamına bağlanmadan önce kurumun saklama ve erişim politikalarıyla tamamlanmalıdır.
 
+### Aylık tahsilata geçiş
+
+`20261006120000_monthly_student_charges` migration'ı mevcut ders/oturum kaynaklı cari hareketlerini değiştirmez veya dönüştürmez. Yeni `student_monthly_charge` kayıtları öğrenci ve ay başına tekildir; Tahsilatlar ekranı yalnız bu yeni aylık tahakkuklara bağlı ödemeleri hesaplar. Canlıya almadan önce standart veritabanı yedeğini alın, migration'ı DDL yetkili `migrate` profiliyle uygulayın ve ilk ayın tahakkuklarını yönetici hesabıyla oluşturun.
+
 ## Statik kalite komutları
 
 - `npm run lint`

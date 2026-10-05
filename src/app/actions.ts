@@ -19,7 +19,6 @@ import { parseGoogleSheetUrl, reconcileSource } from "@/lib/google-forms";
 import { normalizePhone } from "@/lib/integration";
 import { hashPassword } from "@/lib/password";
 import { log, safeErrorCode } from "@/lib/logger";
-import { monthRange, sessionChargeAmount } from "@/lib/finance";
 
 const id = z.string().uuid();
 const requiredText = (max: number) => z.string().trim().min(1).max(max);
@@ -85,6 +84,23 @@ const manualPreRegistrationSchema = z.object({
     })
     .transform((value) => value || null),
   district: optionalText(100),
+});
+
+const studentProfileSchema = z.object({
+  studentId: id,
+  firstName: requiredText(100),
+  lastName: requiredText(100),
+  phone: optionalText(50),
+  birthDate: z
+    .string()
+    .trim()
+    .refine((value) => !value || z.string().date().safeParse(value).success, {
+      message: "Doğum tarihi geçerli değil.",
+    })
+    .transform((value) => value || null),
+  district: optionalText(100),
+  address: optionalText(500),
+  classLevel: optionalText(100),
 });
 
 async function secure<T>(
@@ -764,8 +780,21 @@ const attendanceSchema = z.object({
 });
 const paymentSchema = z.object({
   studentId: id,
+  monthlyChargeId: id.optional(),
   amount: money,
   paidOn: z.string().date(),
+});
+const billingMonth = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+const monthlyChargeSchema = z.object({
+  studentId: id,
+  month: billingMonth,
+  expectedAmount: money,
+  note: optionalText(500),
+});
+const bulkMonthlyChargeSchema = z.object({
+  month: billingMonth,
+  expectedAmount: money,
+  note: optionalText(500),
 });
 
 export async function saveBulkAttendance(
@@ -897,60 +926,29 @@ export async function completeLessonSession(
         });
         if (session.status !== "PLANNED")
           throw new Error("SESSION_NOT_PLANNED");
-        const range = monthRange(session.sessionDate);
         const completed = await tx.lessonSession.count({
           where: {
             courseId: session.courseId,
             status: "COMPLETED",
-            sessionDate: { gte: range.start, lt: range.end },
+            sessionDate: {
+              gte: new Date(Date.UTC(session.sessionDate.getUTCFullYear(), session.sessionDate.getUTCMonth(), 1)),
+              lt: new Date(Date.UTC(session.sessionDate.getUTCFullYear(), session.sessionDate.getUTCMonth() + 1, 1)),
+            },
           },
         });
         if (completed >= session.course.monthlySessionCount)
           throw new Error("MONTHLY_SESSION_LIMIT");
-        const enrollments = await tx.enrollment.findMany({
-          where: {
-            courseId: session.courseId,
-            status: "ACTIVE",
-            enrollmentDate: { lte: session.sessionDate },
-          },
-        });
         await tx.lessonSession.update({
           where: { id: session.id },
           data: { status: "COMPLETED" },
         });
-        for (const enrollment of enrollments) {
-          const existingCharges = await tx.studentAccountEntry.count({
-            where: {
-              enrollmentId: enrollment.id,
-              entryType: "SESSION_CHARGE",
-              occurredOn: { gte: range.start, lt: range.end },
-            },
-          });
-          if (existingCharges >= enrollment.monthlySessionCount) continue;
-          const amount = sessionChargeAmount(
-            enrollment.agreedFeeAmount,
-            enrollment.monthlySessionCount,
-            existingCharges,
-          ).negated();
-          await tx.studentAccountEntry.create({
-            data: {
-              studentId: enrollment.studentId,
-              enrollmentId: enrollment.id,
-              lessonSessionId: session.id,
-              entryType: "SESSION_CHARGE",
-              amount,
-              occurredOn: session.sessionDate,
-              createdByUserId: user.id,
-            },
-          });
-        }
         await writeAudit(
           tx,
           user.id,
           "LESSON_SESSION_COMPLETED",
           "LessonSession",
           session.id,
-          { chargedEnrollments: enrollments.length },
+          { billing: "MONTHLY_STUDENT_CHARGE" },
         );
         return session.courseId;
       },
@@ -958,7 +956,7 @@ export async function completeLessonSession(
     );
     revalidatePath(`/dersler/${courseId}`);
     revalidatePath("/ogrenciler");
-    return actionSuccess("Oturum tamamlandı; aktif öğrencilere borç işlendi.");
+    return actionSuccess("Oturum tamamlandı. Borçlar aylık tahakkuklar üzerinden yönetilir.");
   } catch (error) {
     return failed(
       "completeLessonSession",
@@ -983,24 +981,6 @@ export async function cancelLessonSession(
         where: { id: parsed.data.sessionId },
       });
       if (session.status === "CANCELLED") throw new Error("SESSION_CANCELLED");
-      if (session.status === "COMPLETED") {
-        const charges = await tx.studentAccountEntry.findMany({
-          where: { lessonSessionId: session.id, entryType: "SESSION_CHARGE" },
-        });
-        for (const charge of charges) {
-          await tx.studentAccountEntry.create({
-            data: {
-              studentId: charge.studentId,
-              enrollmentId: charge.enrollmentId,
-              lessonSessionId: session.id,
-              entryType: "SESSION_REVERSAL",
-              amount: charge.amount.negated(),
-              occurredOn: session.sessionDate,
-              createdByUserId: user.id,
-            },
-          });
-        }
-      }
       await tx.lessonSession.update({
         where: { id: session.id },
         data: { status: "CANCELLED" },
@@ -1016,9 +996,126 @@ export async function cancelLessonSession(
     });
     revalidatePath(`/dersler/${courseId}`);
     revalidatePath("/ogrenciler");
-    return actionSuccess("Oturum iptal edildi; oluşan borçlar geri alındı.");
+    return actionSuccess("Oturum iptal edildi. Aylık tahakkuklar etkilenmedi.");
   } catch (error) {
     return failed("cancelLessonSession", error);
+  }
+}
+
+function billingMonthDate(month: string) {
+  return new Date(`${month}-01T00:00:00.000Z`);
+}
+
+export async function upsertStudentMonthlyCharge(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = monthlyChargeSchema.safeParse({
+    studentId: formValue(formData, "studentId"),
+    month: formValue(formData, "month"),
+    expectedAmount: formValue(formData, "expectedAmount"),
+    note: formValue(formData, "note"),
+  });
+  if (!parsed.success)
+    return actionError(parsed.error.issues[0]?.message ?? invalid().message);
+  try {
+    const { user } = await secure(["ADMIN"], async () => null);
+    const changed = await db.$transaction(async (tx) => {
+      const student = await tx.student.findFirstOrThrow({
+        where: { id: parsed.data.studentId, isActive: true },
+      });
+      const billingMonth = billingMonthDate(parsed.data.month);
+      const existing = await tx.studentMonthlyCharge.findUnique({
+        where: {
+          studentId_billingMonth: { studentId: student.id, billingMonth },
+        },
+      });
+      if (
+        existing &&
+        existing.expectedAmount.equals(parsed.data.expectedAmount) &&
+        existing.note === parsed.data.note
+      )
+        return false;
+      const charge = await tx.studentMonthlyCharge.upsert({
+        where: {
+          studentId_billingMonth: { studentId: student.id, billingMonth },
+        },
+        create: {
+          studentId: student.id,
+          billingMonth,
+          expectedAmount: parsed.data.expectedAmount,
+          note: parsed.data.note,
+          createdByUserId: user.id,
+        },
+        update: {
+          expectedAmount: parsed.data.expectedAmount,
+          note: parsed.data.note,
+        },
+      });
+      await writeAudit(
+        tx,
+        user.id,
+        existing ? "STUDENT_MONTHLY_CHARGE_UPDATED" : "STUDENT_MONTHLY_CHARGE_CREATED",
+        "StudentMonthlyCharge",
+        charge.id,
+        {
+          studentId: student.id,
+          month: parsed.data.month,
+          previous: existing
+            ? { expectedAmount: existing.expectedAmount.toString(), note: existing.note }
+            : null,
+          next: { expectedAmount: charge.expectedAmount.toString(), note: charge.note },
+        },
+      );
+      return true;
+    });
+    if (!changed) return actionSuccess("Değişiklik bulunamadı.");
+    revalidatePath("/tahsilatlar");
+    return actionSuccess("Aylık tahakkuk kaydedildi.");
+  } catch (error) {
+    return failed("upsertStudentMonthlyCharge", error, "Aylık tahakkuk kaydedilemedi.");
+  }
+}
+
+export async function createMonthlyChargesForActiveStudents(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = bulkMonthlyChargeSchema.safeParse({
+    month: formValue(formData, "month"),
+    expectedAmount: formValue(formData, "expectedAmount"),
+    note: formValue(formData, "note"),
+  });
+  if (!parsed.success)
+    return actionError(parsed.error.issues[0]?.message ?? invalid().message);
+  try {
+    const { user } = await secure(["ADMIN"], async () => null);
+    const count = await db.$transaction(async (tx) => {
+      const students = await tx.student.findMany({
+        where: { isActive: true },
+        select: { id: true },
+      });
+      const result = await tx.studentMonthlyCharge.createMany({
+        data: students.map((student) => ({
+          studentId: student.id,
+          billingMonth: billingMonthDate(parsed.data.month),
+          expectedAmount: parsed.data.expectedAmount,
+          note: parsed.data.note,
+          createdByUserId: user.id,
+        })),
+        skipDuplicates: true,
+      });
+      await writeAudit(tx, user.id, "STUDENT_MONTHLY_CHARGES_BULK_CREATED", "StudentMonthlyCharge", null, {
+        month: parsed.data.month,
+        expectedAmount: parsed.data.expectedAmount.toString(),
+        created: result.count,
+      });
+      return result.count;
+    });
+    revalidatePath("/tahsilatlar");
+    return actionSuccess(`${count} öğrenci için aylık tahakkuk oluşturuldu.`);
+  } catch (error) {
+    return failed("createMonthlyChargesForActiveStudents", error, "Toplu aylık tahakkuk oluşturulamadı.");
   }
 }
 
@@ -1028,6 +1125,7 @@ export async function recordStudentPayment(
 ): Promise<ActionState> {
   const parsed = paymentSchema.safeParse({
     studentId: formValue(formData, "studentId"),
+    monthlyChargeId: formValue(formData, "monthlyChargeId") || undefined,
     amount: formValue(formData, "amount"),
     paidOn: formValue(formData, "paidOn"),
   });
@@ -1038,9 +1136,18 @@ export async function recordStudentPayment(
       await tx.student.findUniqueOrThrow({
         where: { id: parsed.data.studentId },
       });
+      if (parsed.data.monthlyChargeId) {
+        await tx.studentMonthlyCharge.findFirstOrThrow({
+          where: {
+            id: parsed.data.monthlyChargeId,
+            studentId: parsed.data.studentId,
+          },
+        });
+      }
       const entry = await tx.studentAccountEntry.create({
         data: {
           studentId: parsed.data.studentId,
+          monthlyChargeId: parsed.data.monthlyChargeId,
           entryType: "PAYMENT",
           amount: parsed.data.amount,
           occurredOn: new Date(parsed.data.paidOn),
@@ -1055,6 +1162,7 @@ export async function recordStudentPayment(
         entry.id,
         {
           studentId: parsed.data.studentId,
+          monthlyChargeId: parsed.data.monthlyChargeId ?? null,
           amount: parsed.data.amount.toString(),
           paidOn: parsed.data.paidOn,
         },
@@ -1062,9 +1170,90 @@ export async function recordStudentPayment(
     });
     revalidatePath(`/ogrenciler/${parsed.data.studentId}`);
     revalidatePath("/ogrenciler");
+    revalidatePath("/tahsilatlar");
     return actionSuccess("Ödeme öğrenci bakiyesine eklendi.");
   } catch (error) {
     return failed("recordStudentPayment", error);
+  }
+}
+
+export async function updateStudentProfile(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = studentProfileSchema.safeParse({
+    studentId: formValue(formData, "studentId"),
+    firstName: formValue(formData, "firstName"),
+    lastName: formValue(formData, "lastName"),
+    phone: formValue(formData, "phone"),
+    birthDate: formValue(formData, "birthDate"),
+    district: formValue(formData, "district"),
+    address: formValue(formData, "address"),
+    classLevel: formValue(formData, "classLevel"),
+  });
+  if (!parsed.success)
+    return actionError(parsed.error.issues[0]?.message ?? invalid().message);
+
+  const phone = parsed.data.phone ? normalizePhone(parsed.data.phone) : null;
+  if (parsed.data.phone && !phone)
+    return actionError("Geçerli bir Türkiye telefon numarası girin.");
+
+  try {
+    const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
+    const changed = await db.$transaction(async (tx) => {
+      const student = await tx.student.findUniqueOrThrow({
+        where: { id: parsed.data.studentId },
+      });
+      const birthDate = parsed.data.birthDate
+        ? new Date(parsed.data.birthDate)
+        : null;
+      const previous = {
+        firstName: student.firstName,
+        lastName: student.lastName,
+        phone: student.phone,
+        birthDate: student.birthDate?.toISOString().slice(0, 10) ?? null,
+        district: student.district,
+        address: student.address,
+        classLevel: student.classLevel,
+      };
+      const next = {
+        firstName: parsed.data.firstName,
+        lastName: parsed.data.lastName,
+        phone,
+        birthDate: parsed.data.birthDate,
+        district: parsed.data.district,
+        address: parsed.data.address,
+        classLevel: parsed.data.classLevel,
+      };
+      const hasChanges = Object.entries(next).some(
+        ([key, value]) => previous[key as keyof typeof previous] !== value,
+      );
+      if (!hasChanges) return false;
+
+      await tx.student.update({
+        where: { id: student.id },
+        data: {
+          firstName: next.firstName,
+          lastName: next.lastName,
+          phone: next.phone,
+          birthDate,
+          district: next.district,
+          address: next.address,
+          classLevel: next.classLevel,
+        },
+      });
+      await writeAudit(tx, user.id, "STUDENT_PROFILE_UPDATED", "Student", student.id, {
+        previous,
+        next,
+      });
+      return true;
+    });
+    if (!changed) return actionSuccess("Değişiklik bulunamadı.");
+    revalidatePath(`/ogrenciler/${parsed.data.studentId}`);
+    revalidatePath("/ogrenciler");
+    return actionSuccess("Öğrenci profili güncellendi.");
+  } catch (error) {
+    return failed("updateStudentProfile", error, "Öğrenci profili güncellenemedi.");
   }
 }
 
@@ -1150,6 +1339,7 @@ export async function reverseStudentPayment(
       const reversal = await tx.studentAccountEntry.create({
         data: {
           studentId: payment.studentId,
+          monthlyChargeId: payment.monthlyChargeId,
           entryType: "PAYMENT",
           amount: payment.amount.negated(),
           occurredOn: new Date(),
