@@ -75,9 +75,14 @@ export default async function CourseDetailPage({
           title={course.name}
           description={`${course.academicYear.displayName} · ${course.teacher.firstName} ${course.teacher.lastName}`}
         />
-        <Button render={<Link href={`/dersler/${course.id}/oturumlar`} />}>
-          Oturumlar ve yoklama
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" render={<Link href={`/dersler/${course.id}/ogrenciler`} />}>
+            Aktif öğrenciler
+          </Button>
+          <Button render={<Link href={`/dersler/${course.id}/oturumlar`} />}>
+            Oturumlar ve yoklama
+          </Button>
+        </div>
       </div>
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>

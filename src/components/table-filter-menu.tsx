@@ -1,19 +1,27 @@
-"use client";
-
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Funnel } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 
 type FilterOption = { label: string; value: string };
+type Query = Record<string, string | number>;
+
+function PreservedQuery({
+  params,
+  omitted,
+}: {
+  params: Query;
+  omitted: string;
+}) {
+  return (
+    <>
+      {Object.entries(params)
+        .filter(([key]) => key !== omitted && key !== "page")
+        .map(([key, value]) => (
+          <input key={key} type="hidden" name={key} value={value} />
+        ))}
+      <input type="hidden" name="page" value="1" />
+    </>
+  );
+}
 
 export function TableFilterMenu({
   label,
@@ -25,47 +33,43 @@ export function TableFilterMenu({
 }: {
   label: string;
   pathname: string;
-  params: Record<string, string | number>;
+  params: Query;
   param: string;
   value: string;
   options: FilterOption[];
 }) {
-  const router = useRouter();
-  const selectOption = (option: string) => {
-    const query = new URLSearchParams(
-      Object.entries(params).map(([key, item]) => [key, String(item)]),
-    );
-    query.set(param, option);
-    query.set("page", "1");
-    router.push(`${pathname}?${query.toString()}`);
-  };
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            aria-label={`${label} filtresi`}
-            size="icon-xs"
-            variant={value === "ALL" ? "ghost" : "secondary"}
-          />
-        }
+    <details className="relative inline-block align-middle">
+      <summary
+        aria-label={`${label} filtresi`}
+        className={`inline-flex size-6 cursor-pointer list-none items-center justify-center rounded-md hover:bg-muted [&::-webkit-details-marker]:hidden ${value === "ALL" ? "" : "bg-secondary text-secondary-foreground"}`}
       >
         <Funnel />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-44">
-        <DropdownMenuLabel>{label} filtresi</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {options.map((option) => (
-          <DropdownMenuItem
-            key={option.value}
-            onClick={() => selectOption(option.value)}
+      </summary>
+      <form
+        action={pathname}
+        className="absolute left-0 z-50 mt-2 w-56 space-y-3 rounded-lg border bg-popover p-3 text-popover-foreground shadow-md"
+      >
+        <PreservedQuery params={params} omitted={param} />
+        <label className="block space-y-1 text-sm font-medium">
+          <span>{label} filtresi</span>
+          <select
+            name={param}
+            defaultValue={value}
+            className="h-8 w-full rounded-lg border bg-transparent px-2 text-sm"
           >
-            <span className="flex-1">{option.label}</span>
-            {value === option.value ? <span aria-hidden>✓</span> : null}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button type="submit" size="sm" className="w-full">
+          Uygula
+        </Button>
+      </form>
+    </details>
   );
 }
 
@@ -79,72 +83,36 @@ export function TableSearchFilterMenu({
 }: {
   label: string;
   pathname: string;
-  params: Record<string, string | number>;
+  params: Query;
   param: string;
   value: string;
   placeholder: string;
 }) {
-  const router = useRouter();
-  const [term, setTerm] = useState(value);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            aria-label={`${label} filtresi`}
-            size="icon-xs"
-            variant={value ? "secondary" : "ghost"}
-          />
-        }
+    <details className="relative inline-block align-middle">
+      <summary
+        aria-label={`${label} filtresi`}
+        className={`inline-flex size-6 cursor-pointer list-none items-center justify-center rounded-md hover:bg-muted [&::-webkit-details-marker]:hidden ${value ? "bg-secondary text-secondary-foreground" : ""}`}
       >
         <Funnel />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64 p-3">
-        <form
-          className="space-y-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const query = new URLSearchParams(
-              Object.entries(params).map(([key, item]) => [key, String(item)]),
-            );
-            query.set(param, term.trim());
-            query.set("page", "1");
-            router.push(`${pathname}?${query.toString()}`);
-          }}
-        >
-          <label htmlFor={`${param}-filter`} className="text-sm font-medium">
-            {label} ara
-          </label>
+      </summary>
+      <form
+        action={pathname}
+        className="absolute left-0 z-50 mt-2 w-64 space-y-3 rounded-lg border bg-popover p-3 text-popover-foreground shadow-md"
+      >
+        <PreservedQuery params={params} omitted={param} />
+        <label className="block space-y-1 text-sm font-medium">
+          <span>{label} ara</span>
           <input
-            id={`${param}-filter`}
-            value={term}
-            onChange={(event) => setTerm(event.target.value)}
+            name={param}
+            defaultValue={value}
             placeholder={placeholder}
+            maxLength={100}
             className="h-8 w-full rounded-lg border bg-transparent px-2 text-sm"
           />
-          <div className="flex gap-2">
-            <Button type="submit" size="sm">Uygula</Button>
-            {value ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setTerm("");
-                  const query = new URLSearchParams(
-                    Object.entries(params).map(([key, item]) => [key, String(item)]),
-                  );
-                  query.set(param, "");
-                  query.set("page", "1");
-                  router.push(`${pathname}?${query.toString()}`);
-                }}
-              >
-                Temizle
-              </Button>
-            ) : null}
-          </div>
-        </form>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        </label>
+        <Button type="submit" size="sm">Uygula</Button>
+      </form>
+    </details>
   );
 }
