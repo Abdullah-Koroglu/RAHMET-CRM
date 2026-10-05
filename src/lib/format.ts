@@ -5,6 +5,7 @@ export const statusLabels: Record<string, string> = {
   APPROVED: "Onaylandı",
   REJECTED: "Reddedildi",
   CONVERTED: "Kesin kayda dönüştü",
+  CANCELLED: "Kesin kayıt iptal edildi",
   ACTIVE: "Aktif",
   PAUSED: "Duraklatıldı",
   ERROR: "Hata",

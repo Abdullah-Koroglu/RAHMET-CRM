@@ -47,6 +47,7 @@ enum PreRegistrationStatus {
   APPROVED
   REJECTED
   CONVERTED
+  CANCELLED
 
   @@schema("rahmet_crm")
 }

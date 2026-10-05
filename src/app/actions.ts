@@ -678,6 +678,81 @@ export async function convertPreRegistration(
   }
 }
 
+export async function cancelConvertedPreRegistration(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = z.object({ id, reason: requiredText(1000) }).safeParse({
+    id: formValue(formData, "id"),
+    reason: formValue(formData, "reason"),
+  });
+  if (!parsed.success) return invalid();
+  try {
+    const { user } = await secure(["ADMIN"], async () => null);
+    const result = await db.$transaction(async (tx) => {
+      const registration = await tx.preRegistration.findUniqueOrThrow({
+        where: { id: parsed.data.id },
+        include: { conversion: { include: { enrollment: true } } },
+      });
+      if (
+        registration.status !== "CONVERTED" ||
+        !registration.conversion?.enrollment
+      ) {
+        throw new Error("CONVERSION_NOT_ACTIVE");
+      }
+      const enrollment = registration.conversion.enrollment;
+      if (enrollment.status !== "ACTIVE") {
+        throw new Error("ENROLLMENT_NOT_ACTIVE");
+      }
+      await tx.enrollment.update({
+        where: { id: enrollment.id },
+        data: { status: "CANCELLED" },
+      });
+      await tx.preRegistration.update({
+        where: { id: registration.id },
+        data: { status: "CANCELLED", assignedOperatorId: user.id },
+      });
+      await tx.preRegistrationActivity.create({
+        data: {
+          preRegistrationId: registration.id,
+          actorUserId: user.id,
+          activityType: "STATUS_CHANGE",
+          fromStatus: "CONVERTED",
+          toStatus: "CANCELLED",
+          note: parsed.data.reason,
+        },
+      });
+      await writeAudit(
+        tx,
+        user.id,
+        "CONVERTED_PRE_REGISTRATION_CANCELLED",
+        "PreRegistration",
+        registration.id,
+        {
+          studentId: registration.conversion.studentId,
+          enrollmentId: enrollment.id,
+          reason: parsed.data.reason,
+        },
+      );
+      return {
+        studentId: registration.conversion.studentId,
+        courseId: enrollment.courseId,
+      };
+    });
+    revalidatePath("/on-kayitlar");
+    revalidatePath("/ogrenciler");
+    revalidatePath(`/ogrenciler/${result.studentId}`);
+    revalidatePath(`/dersler/${result.courseId}`);
+    return actionSuccess("Kesin kayıt iptal edildi; ders kaydı pasife alındı.");
+  } catch (error) {
+    return failed(
+      "cancelConvertedPreRegistration",
+      error,
+      "Kesin kayıt iptal edilemedi. Kayıt durumunu kontrol edin.",
+    );
+  }
+}
+
 const sessionSchema = z.object({
   courseId: id,
   sessionDate: z.string().date(),

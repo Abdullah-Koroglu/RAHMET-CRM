@@ -7,6 +7,7 @@ import {
 } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
 import { ConvertPreRegistrationDialog } from "@/components/convert-pre-registration-dialog";
+import { CancelConvertedRegistrationDialog } from "@/components/cancel-converted-registration-dialog";
 import { ManualPreRegistrationDialog } from "@/components/manual-pre-registration-dialog";
 import { TableSortLink } from "@/components/table-sort-link";
 import {
@@ -47,7 +48,8 @@ const statuses: PreRegistrationStatus[] = [
   "CONTACTED",
   "APPROVED",
   "REJECTED",
-  "CONVERTED",
+    "CONVERTED",
+    "CANCELLED",
 ];
 const statusSchema = z.enum(statuses);
 
@@ -368,7 +370,7 @@ export default async function PreRegistrationsPage({
                     Doğrulama: {selected.validationErrors.join(", ")}
                   </div>
                 ) : null}
-                {selected.conversion ? (
+                {selected.conversion && selected.status === "CONVERTED" ? (
                   <div className="rounded-md border p-3 text-sm">
                     <p className="font-medium">Kesin kayda dönüştü</p>
                     <Link
@@ -378,6 +380,22 @@ export default async function PreRegistrationsPage({
                       {selected.conversion.student.firstName}{" "}
                       {selected.conversion.student.lastName}
                     </Link>
+                    {user.role === "ADMIN" ? (
+                      <div className="mt-3">
+                        <CancelConvertedRegistrationDialog
+                          id={selected.id}
+                          fullName={selected.fullName}
+                          courseName={selected.course.name}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                ) : selected.status === "CANCELLED" ? (
+                  <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+                    <p className="font-medium">Kesin kayıt iptal edildi</p>
+                    <p className="text-muted-foreground">
+                      Öğrenci ve finans hareketleri geçmişte korunur; bu dersteki aktif kayıt sonlandırılmıştır.
+                    </p>
                   </div>
                 ) : canMutate ? (
                   <>
