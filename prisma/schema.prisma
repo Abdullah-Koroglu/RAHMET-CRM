@@ -386,6 +386,7 @@ model StudentAccountEntry {
   enrollmentId    String?                 @map("enrollment_id") @db.Uuid
   lessonSessionId String?                 @map("lesson_session_id") @db.Uuid
   monthlyChargeId  String?                 @map("monthly_charge_id") @db.Uuid
+  paymentRequestId String?                 @unique @map("payment_request_id") @db.Uuid
   entryType       StudentAccountEntryType @map("entry_type")
   amount          Decimal                 @db.Decimal(12, 2)
   occurredOn      DateTime                @map("occurred_on") @db.Date

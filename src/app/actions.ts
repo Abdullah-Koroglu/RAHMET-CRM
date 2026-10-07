@@ -780,7 +780,8 @@ const attendanceSchema = z.object({
 });
 const paymentSchema = z.object({
   studentId: id,
-  monthlyChargeId: id.optional(),
+  monthlyChargeId: id,
+  paymentRequestId: id,
   amount: money,
   paidOn: z.string().date(),
 });
@@ -1125,29 +1126,35 @@ export async function recordStudentPayment(
 ): Promise<ActionState> {
   const parsed = paymentSchema.safeParse({
     studentId: formValue(formData, "studentId"),
-    monthlyChargeId: formValue(formData, "monthlyChargeId") || undefined,
+    monthlyChargeId: formValue(formData, "monthlyChargeId"),
+    paymentRequestId: formValue(formData, "paymentRequestId"),
     amount: formValue(formData, "amount"),
     paidOn: formValue(formData, "paidOn"),
   });
   if (!parsed.success) return invalid();
   try {
     const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
-    await db.$transaction(async (tx) => {
+    const created = await db.$transaction(async (tx) => {
+      const alreadyRecorded = await tx.studentAccountEntry.findUnique({
+        where: { paymentRequestId: parsed.data.paymentRequestId },
+      });
+      if (alreadyRecorded) return false;
       await tx.student.findUniqueOrThrow({
         where: { id: parsed.data.studentId },
       });
-      if (parsed.data.monthlyChargeId) {
-        await tx.studentMonthlyCharge.findFirstOrThrow({
-          where: {
-            id: parsed.data.monthlyChargeId,
-            studentId: parsed.data.studentId,
-          },
-        });
-      }
+      const charge = await tx.studentMonthlyCharge.findFirstOrThrow({
+        where: {
+          id: parsed.data.monthlyChargeId,
+          studentId: parsed.data.studentId,
+        },
+      });
+      if (charge.billingMonth.toISOString().slice(0, 7) !== parsed.data.paidOn.slice(0, 7))
+        return null;
       const entry = await tx.studentAccountEntry.create({
         data: {
           studentId: parsed.data.studentId,
           monthlyChargeId: parsed.data.monthlyChargeId,
+          paymentRequestId: parsed.data.paymentRequestId,
           entryType: "PAYMENT",
           amount: parsed.data.amount,
           occurredOn: new Date(parsed.data.paidOn),
@@ -1167,12 +1174,22 @@ export async function recordStudentPayment(
           paidOn: parsed.data.paidOn,
         },
       );
+      return true;
     });
+    if (created === null)
+      return actionError("Ödeme tarihi, bağlı aylık tahakkukla aynı ayda olmalıdır.");
+    if (!created) return actionSuccess("Bu ödeme zaten kaydedilmiş.");
     revalidatePath(`/ogrenciler/${parsed.data.studentId}`);
     revalidatePath("/ogrenciler");
     revalidatePath("/tahsilatlar");
     return actionSuccess("Ödeme öğrenci bakiyesine eklendi.");
   } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return actionSuccess("Bu ödeme zaten kaydedilmiş.");
+    }
     return failed("recordStudentPayment", error);
   }
 }
@@ -1279,6 +1296,12 @@ export async function updateStudentPayment(
           amount: { gt: 0 },
         },
       });
+      if (!payment.monthlyChargeId) throw new Error("LEGACY_PAYMENT_NOT_MONTHLY");
+      const charge = await tx.studentMonthlyCharge.findFirstOrThrow({
+        where: { id: payment.monthlyChargeId, studentId: payment.studentId },
+      });
+      if (charge.billingMonth.toISOString().slice(0, 7) !== parsed.data.paidOn.slice(0, 7))
+        throw new Error("PAYMENT_DATE_MONTH_MISMATCH");
       const updated = await tx.studentAccountEntry.update({
         where: { id: payment.id },
         data: {
@@ -1302,9 +1325,17 @@ export async function updateStudentPayment(
       );
     });
     revalidatePath(`/ogrenciler/${parsed.data.studentId}`);
+    revalidatePath("/ogrenciler");
     revalidatePath("/tahsilatlar");
     return actionSuccess("Ödeme güncellendi.");
   } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "PAYMENT_DATE_MONTH_MISMATCH"
+    )
+      return actionError("Ödeme tarihi, bağlı aylık tahakkukla aynı ayda olmalıdır.");
+    if (error instanceof Error && error.message === "LEGACY_PAYMENT_NOT_MONTHLY")
+      return actionError("Eski ödeme kayıtları aylık tahsilat ekranından düzenlenemez.");
     return failed("updateStudentPayment", error, "Ödeme güncellenemedi.");
   }
 }
@@ -1329,6 +1360,7 @@ export async function reverseStudentPayment(
           amount: { gt: 0 },
         },
       });
+      if (!payment.monthlyChargeId) throw new Error("LEGACY_PAYMENT_NOT_MONTHLY");
       const reversalExists = await tx.auditLog.findFirst({
         where: {
           action: "STUDENT_PAYMENT_REVERSED",
@@ -1342,7 +1374,9 @@ export async function reverseStudentPayment(
           monthlyChargeId: payment.monthlyChargeId,
           entryType: "PAYMENT",
           amount: payment.amount.negated(),
-          occurredOn: new Date(),
+          // An cancellation offsets the payment in the same monthly report,
+          // so a removed payment cannot remain in that month's total.
+          occurredOn: payment.occurredOn,
           createdByUserId: user.id,
         },
       });
@@ -1360,9 +1394,12 @@ export async function reverseStudentPayment(
       );
     });
     revalidatePath(`/ogrenciler/${parsed.data.studentId}`);
+    revalidatePath("/ogrenciler");
     revalidatePath("/tahsilatlar");
     return actionSuccess("Ödeme iptal edildi; bakiyeye ters kayıt işlendi.");
   } catch (error) {
+    if (error instanceof Error && error.message === "LEGACY_PAYMENT_NOT_MONTHLY")
+      return actionError("Eski ödeme kayıtları aylık tahsilat ekranından iptal edilemez.");
     return failed("reverseStudentPayment", error, "Ödeme iptal edilemedi.");
   }
 }

@@ -1,12 +1,9 @@
 import { notFound } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { recordStudentPayment } from "@/app/actions";
-import { ActionForm } from "@/components/action-form";
 import { PaymentActionsDialog } from "@/components/payment-actions-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Table,
@@ -111,7 +108,6 @@ export default async function StudentDetailPage({
     (sum, entry) => sum.plus(entry.amount),
     new Prisma.Decimal(0),
   );
-  const today = new Date().toISOString().slice(0, 10);
   const displayedEnrollments = student.enrollments
     .filter(
       (enrollment) =>
@@ -383,34 +379,9 @@ export default async function StudentDetailPage({
                 : "Ödenmesi gereken borç"}
             </p>
             {canMutateOperations(user.role) ? (
-              <ActionForm
-                action={recordStudentPayment}
-                className="space-y-3 border-t pt-4"
-              >
-                <input type="hidden" name="studentId" value={student.id} />
-                <div className="space-y-2">
-                  <Label htmlFor="amount">Alınan ödeme (TL)</Label>
-                  <Input
-                    id="amount"
-                    name="amount"
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="paidOn">Ödeme tarihi</Label>
-                  <Input
-                    id="paidOn"
-                    name="paidOn"
-                    type="date"
-                    defaultValue={today}
-                    required
-                  />
-                </div>
-                <Button type="submit">Ödemeyi ekle</Button>
-              </ActionForm>
+              <p className="border-t pt-4 text-sm text-muted-foreground">
+                Ödeme eklemek için Tahsilatlar ekranında ilgili aylık tahakkuku seçin.
+              </p>
             ) : null}
           </CardContent>
         </Card>

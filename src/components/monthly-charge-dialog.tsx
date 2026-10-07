@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import {
   createMonthlyChargesForActiveStudents,
   recordStudentPayment,
@@ -73,6 +75,7 @@ export function MonthlyPaymentDialog({
   month: string;
   today: string;
 }) {
+  const [paymentRequestId] = useState(() => crypto.randomUUID());
   return (
     <Dialog>
       <DialogTrigger render={<Button size="sm" />}>
@@ -86,6 +89,7 @@ export function MonthlyPaymentDialog({
         <ActionForm action={recordStudentPayment} className="space-y-3">
           <input type="hidden" name="studentId" value={studentId} />
           <input type="hidden" name="monthlyChargeId" value={monthlyChargeId} />
+          <input type="hidden" name="paymentRequestId" value={paymentRequestId} />
           <div className="space-y-2">
             <Label htmlFor={`monthly-payment-amount-${studentId}`}>Alınan ödeme (TL)</Label>
             <Input id={`monthly-payment-amount-${studentId}`} name="amount" type="number" min="0.01" step="0.01" required />
