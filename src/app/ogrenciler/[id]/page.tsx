@@ -16,6 +16,7 @@ import {
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { StudentProfileDialog } from "@/components/student-profile-dialog";
+import { StudentPaymentDialog } from "@/components/student-payment-dialog";
 import { TableSortLink } from "@/components/table-sort-link";
 import { canMutateOperations, getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -86,6 +87,9 @@ export default async function StudentDetailPage({
       accountEntries: {
         include: { enrollment: { include: { course: true } } },
         orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }],
+      },
+      monthlyCharges: {
+        orderBy: { billingMonth: "desc" },
       },
     },
   });
@@ -379,9 +383,19 @@ export default async function StudentDetailPage({
                 : "Ödenmesi gereken borç"}
             </p>
             {canMutateOperations(user.role) ? (
-              <p className="border-t pt-4 text-sm text-muted-foreground">
-                Ödeme eklemek için Tahsilatlar ekranında ilgili aylık tahakkuku seçin.
-              </p>
+              <div className="border-t pt-4">
+                <StudentPaymentDialog
+                  studentId={student.id}
+                  studentName={`${student.firstName} ${student.lastName}`}
+                  charges={student.monthlyCharges.map((charge) => ({
+                    id: charge.id,
+                    billingMonth: charge.billingMonth.toISOString().slice(0, 7),
+                    expectedAmount: charge.expectedAmount.toString(),
+                  }))}
+                  isAdmin={user.role === "ADMIN"}
+                  currentMonth={new Date().toISOString().slice(0, 7)}
+                />
+              </div>
             ) : null}
           </CardContent>
         </Card>
