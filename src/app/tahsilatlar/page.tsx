@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { BulkMonthlyChargeDialog, MonthlyChargeDialog, MonthlyPaymentDialog } from "@/components/monthly-charge-dialog";
+import { MonthlyPaymentDialog } from "@/components/monthly-charge-dialog";
 import { PaymentActionsDialog } from "@/components/payment-actions-dialog";
 import { PageHeader } from "@/components/page-header";
 import { TableSortLink } from "@/components/table-sort-link";
@@ -51,6 +51,10 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
             occurredOn: { gte: billingMonth, lt: nextBillingMonth },
           },
         },
+        enrollments: {
+          where: { status: "ACTIVE" },
+          select: { agreedFeeAmount: true },
+        },
       },
       orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
     }),
@@ -77,7 +81,12 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
   const totalPaidByStudent = new Map(allPaymentTotals.map((item) => [item.studentId, item._sum.amount ?? new Prisma.Decimal(0)]));
   const rows = students.map((student) => {
     const charge = student.monthlyCharges[0] ?? null;
-    const expected = charge?.expectedAmount ?? new Prisma.Decimal(0);
+    const derivedExpected = student.enrollments.reduce(
+      (sum, enrollment) => sum.plus(enrollment.agreedFeeAmount),
+      new Prisma.Decimal(0),
+    );
+    const expected = charge?.expectedAmount ?? derivedExpected;
+    const expectedConfigured = expected.greaterThan(0);
     const chargePaid = charge
       ? charge.payments.reduce((sum, entry) => sum.plus(entry.amount), new Prisma.Decimal(0))
       : new Prisma.Decimal(0);
@@ -86,9 +95,13 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
       new Prisma.Decimal(0),
     );
     const paid = chargePaid.plus(directPaid);
-    const remaining = Prisma.Decimal.max(new Prisma.Decimal(0), expected.minus(chargePaid));
-    const credit = Prisma.Decimal.max(new Prisma.Decimal(0), chargePaid.minus(expected));
-    return { ...student, charge, expected, paid, directPaid, remaining, credit, totalPaid: totalPaidByStudent.get(student.id) ?? new Prisma.Decimal(0) };
+    const remaining = expectedConfigured
+      ? Prisma.Decimal.max(new Prisma.Decimal(0), expected.minus(paid))
+      : new Prisma.Decimal(0);
+    const credit = expectedConfigured
+      ? Prisma.Decimal.max(new Prisma.Decimal(0), paid.minus(expected))
+      : new Prisma.Decimal(0);
+    return { ...student, charge, expected, expectedConfigured, paid, directPaid, remaining, credit, totalPaid: totalPaidByStudent.get(student.id) ?? new Prisma.Decimal(0) };
   });
   const filteredRows = rows.filter((row) => {
     const fullName = `${row.firstName} ${row.lastName}`.toLocaleLowerCase("tr-TR");
@@ -113,7 +126,7 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
   const query = { q, balance: balanceFilter.success ? balanceFilter.data : "ALL", month };
 
   return <div className="space-y-6">
-    <PageHeader title="Tahsilatlar" description="Aylık toplamlar, tahakkuka bağlı veya doğrudan öğrenci-ay ödeme hareketlerinden hesaplanır." actions={user.role === "ADMIN" ? <BulkMonthlyChargeDialog month={month} /> : undefined} />
+    <PageHeader title="Tahsilatlar" description="Aylık beklenen tutarlar aktif kesin kayıtların kayıt ücretlerinden otomatik hesaplanır; ödeme girildiğinde tahakkuk da otomatik oluşturulur." />
     <Card><CardContent className="pt-6">
       <form className="mb-5 grid gap-3 sm:grid-cols-[auto_160px_1fr_180px_auto] sm:items-end">
         <Button variant="outline" render={<Link href={{ pathname: "/tahsilatlar", query: { ...query, month: shiftMonth(month, -1) } }} />}>Önceki ay</Button>
@@ -132,9 +145,9 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
     <Card><CardHeader><CardTitle>Aylık öğrenci özeti</CardTitle></CardHeader><CardContent>
       <Table><TableHeader><TableRow>{[["student", "Öğrenci"], ["expected", "Aylık beklenen"], ["paid", "Aylık ödenen"], ["remaining", "Kalan borç"]].map(([value, label]) => <TableHead key={value} className={value === "student" ? undefined : "text-right"}><TableSortLink href={{ pathname: "/tahsilatlar", query: { ...query, sort: value, direction: sort === value && direction === "asc" ? "desc" : "asc" } }} active={sort === value} direction={direction}>{label}</TableSortLink></TableHead>)}<TableHead className="text-right">Toplam ödeme</TableHead><TableHead className="text-right">İşlem</TableHead></TableRow></TableHeader>
         <TableBody>{filteredRows.map((row) => <TableRow key={row.id}>
-          <TableCell><Link className="font-medium hover:underline" href={`/ogrenciler/${row.id}`}>{row.firstName} {row.lastName}</Link>{row.directPaid.greaterThan(0) ? <p className="text-xs text-muted-foreground">Tahakkuksuz ödeme: {formatMoney(row.directPaid)}</p> : null}{row.credit.greaterThan(0) ? <p className="text-xs text-emerald-700">Devreden fazla ödeme: {formatMoney(row.credit)}</p> : null}</TableCell>
-          <TableCell className="text-right">{formatMoney(row.expected)}</TableCell><TableCell className="text-right text-emerald-700">{formatMoney(row.paid)}</TableCell><TableCell className={row.remaining.greaterThan(0) ? "text-right font-medium text-destructive" : "text-right font-medium"}>{formatMoney(row.remaining)}</TableCell><TableCell className="text-right font-medium">{formatMoney(row.totalPaid)}</TableCell>
-          <TableCell className="text-right"><div className="flex flex-wrap justify-end gap-2">{user.role === "ADMIN" ? <MonthlyChargeDialog studentId={row.id} studentName={`${row.firstName} ${row.lastName}`} month={month} expectedAmount={row.charge?.expectedAmount.toString()} note={row.charge?.note} /> : null}{canMutateOperations(user.role) ? <MonthlyPaymentDialog studentId={row.id} studentName={`${row.firstName} ${row.lastName}`} month={month} today={paymentDate} /> : null}</div></TableCell>
+          <TableCell><Link className="font-medium hover:underline" href={`/ogrenciler/${row.id}`}>{row.firstName} {row.lastName}</Link>{!row.expectedConfigured ? <p className="text-xs text-amber-700">Aktif ders ücreti tanımlı değil; borç hesaplanmadı.</p> : null}{row.directPaid.greaterThan(0) ? <p className="text-xs text-muted-foreground">Tahakkuksuz ödeme: {formatMoney(row.directPaid)}</p> : null}{row.credit.greaterThan(0) ? <p className="text-xs text-emerald-700">Devreden fazla ödeme: {formatMoney(row.credit)}</p> : null}</TableCell>
+          <TableCell className="text-right">{row.expectedConfigured ? formatMoney(row.expected) : "—"}</TableCell><TableCell className="text-right text-emerald-700">{formatMoney(row.paid)}</TableCell><TableCell className={row.remaining.greaterThan(0) ? "text-right font-medium text-destructive" : "text-right font-medium"}>{row.expectedConfigured ? formatMoney(row.remaining) : "—"}</TableCell><TableCell className="text-right font-medium">{formatMoney(row.totalPaid)}</TableCell>
+          <TableCell className="text-right">{canMutateOperations(user.role) ? <MonthlyPaymentDialog studentId={row.id} studentName={`${row.firstName} ${row.lastName}`} month={month} today={paymentDate} /> : null}</TableCell>
         </TableRow>)}</TableBody></Table>
       {!filteredRows.length ? <p className="py-8 text-center text-sm text-muted-foreground">Seçilen ay ve filtrelere uygun aktif öğrenci bulunamadı.</p> : null}
     </CardContent></Card>

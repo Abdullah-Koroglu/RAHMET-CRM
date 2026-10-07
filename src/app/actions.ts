@@ -1141,20 +1141,47 @@ export async function recordStudentPayment(
         where: { paymentRequestId: parsed.data.paymentRequestId },
       });
       if (alreadyRecorded) return false;
-      const student = await tx.student.findUniqueOrThrow({
-        where: { id: parsed.data.studentId },
-        include: {
-          enrollments: { where: { status: "ACTIVE" }, select: { id: true }, take: 1 },
-        },
+      await tx.student.findUniqueOrThrow({ where: { id: parsed.data.studentId } });
+      const activeEnrollments = await tx.enrollment.findMany({
+        where: { studentId: parsed.data.studentId, status: "ACTIVE" },
+        select: { agreedFeeAmount: true },
       });
-      if (!student.enrollments.length) throw new Error("STUDENT_WITHOUT_ACTIVE_ENROLLMENT");
+      if (!activeEnrollments.length) throw new Error("STUDENT_WITHOUT_ACTIVE_ENROLLMENT");
       if (parsed.data.month !== parsed.data.paidOn.slice(0, 7)) return null;
-      const charge = await tx.studentMonthlyCharge.findFirst({
+      const billingMonth = billingMonthDate(parsed.data.month);
+      let charge = await tx.studentMonthlyCharge.findFirst({
         where: {
           studentId: parsed.data.studentId,
-          billingMonth: new Date(`${parsed.data.month}-01T00:00:00.000Z`),
+          billingMonth,
         },
       });
+      const derivedExpectedAmount = activeEnrollments.reduce(
+        (total, enrollment) => total.plus(enrollment.agreedFeeAmount),
+        new Prisma.Decimal(0),
+      );
+      if (!charge && derivedExpectedAmount.greaterThan(0)) {
+        charge = await tx.studentMonthlyCharge.create({
+          data: {
+            studentId: parsed.data.studentId,
+            billingMonth,
+            expectedAmount: derivedExpectedAmount,
+            note: "Aktif kesin kayıt ücretlerinden otomatik oluşturuldu.",
+            createdByUserId: user.id,
+          },
+        });
+        await writeAudit(
+          tx,
+          user.id,
+          "STUDENT_MONTHLY_CHARGE_AUTO_CREATED",
+          "StudentMonthlyCharge",
+          charge.id,
+          {
+            studentId: parsed.data.studentId,
+            month: parsed.data.month,
+            expectedAmount: derivedExpectedAmount.toString(),
+          },
+        );
+      }
       const entry = await tx.studentAccountEntry.create({
         data: {
           studentId: parsed.data.studentId,
