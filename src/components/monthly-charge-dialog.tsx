@@ -65,13 +65,11 @@ export function MonthlyChargeDialog({
 export function MonthlyPaymentDialog({
   studentId,
   studentName,
-  monthlyChargeId,
   month,
   today,
 }: {
   studentId: string;
   studentName: string;
-  monthlyChargeId: string;
   month: string;
   today: string;
 }) {
@@ -84,12 +82,12 @@ export function MonthlyPaymentDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Aylık ödeme ekle</DialogTitle>
-          <DialogDescription>{studentName} · {month} tahakkukuna işlenir.</DialogDescription>
+          <DialogDescription>{studentName} · {month}. Tahakkuk varsa ödeme otomatik olarak bağlanır.</DialogDescription>
         </DialogHeader>
         <ActionForm action={recordStudentPayment} className="space-y-3">
           <input type="hidden" name="studentId" value={studentId} />
-          <input type="hidden" name="monthlyChargeId" value={monthlyChargeId} />
           <input type="hidden" name="paymentRequestId" value={paymentRequestId} />
+          <input type="hidden" name="month" value={month} />
           <div className="space-y-2">
             <Label htmlFor={`monthly-payment-amount-${studentId}`}>Alınan ödeme (TL)</Label>
             <Input id={`monthly-payment-amount-${studentId}`} name="amount" type="number" min="0.01" step="0.01" required />
@@ -97,6 +95,10 @@ export function MonthlyPaymentDialog({
           <div className="space-y-2">
             <Label htmlFor={`monthly-payment-date-${studentId}`}>Ödeme tarihi</Label>
             <Input id={`monthly-payment-date-${studentId}`} name="paidOn" type="date" defaultValue={today} required />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={`monthly-payment-note-${studentId}`}>Açıklama</Label>
+            <Textarea id={`monthly-payment-note-${studentId}`} name="note" maxLength={500} rows={3} placeholder="Ödeme açıklaması" />
           </div>
           <Button type="submit" className="w-full">Ödemeyi kaydet</Button>
         </ActionForm>

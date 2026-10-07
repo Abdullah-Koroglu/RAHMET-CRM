@@ -389,6 +389,7 @@ model StudentAccountEntry {
   paymentRequestId String?                 @unique @map("payment_request_id") @db.Uuid
   entryType       StudentAccountEntryType @map("entry_type")
   amount          Decimal                 @db.Decimal(12, 2)
+  note            String?
   occurredOn      DateTime                @map("occurred_on") @db.Date
   createdByUserId String                  @map("created_by_user_id") @db.Uuid
   student         Student                 @relation(fields: [studentId], references: [id], onDelete: Restrict)

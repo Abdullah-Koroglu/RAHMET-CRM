@@ -778,14 +778,15 @@ const attendanceSchema = z.object({
   sessionId: id,
   enrollmentIds: z.array(id).max(1000),
 });
+const billingMonth = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 const paymentSchema = z.object({
   studentId: id,
-  monthlyChargeId: id,
   paymentRequestId: id,
   amount: money,
+  month: billingMonth,
   paidOn: z.string().date(),
+  note: optionalText(500),
 });
-const billingMonth = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 const monthlyChargeSchema = z.object({
   studentId: id,
   month: billingMonth,
@@ -1126,10 +1127,11 @@ export async function recordStudentPayment(
 ): Promise<ActionState> {
   const parsed = paymentSchema.safeParse({
     studentId: formValue(formData, "studentId"),
-    monthlyChargeId: formValue(formData, "monthlyChargeId"),
     paymentRequestId: formValue(formData, "paymentRequestId"),
     amount: formValue(formData, "amount"),
+    month: formValue(formData, "month"),
     paidOn: formValue(formData, "paidOn"),
+    note: formValue(formData, "note"),
   });
   if (!parsed.success) return invalid();
   try {
@@ -1139,24 +1141,28 @@ export async function recordStudentPayment(
         where: { paymentRequestId: parsed.data.paymentRequestId },
       });
       if (alreadyRecorded) return false;
-      await tx.student.findUniqueOrThrow({
+      const student = await tx.student.findUniqueOrThrow({
         where: { id: parsed.data.studentId },
-      });
-      const charge = await tx.studentMonthlyCharge.findFirstOrThrow({
-        where: {
-          id: parsed.data.monthlyChargeId,
-          studentId: parsed.data.studentId,
+        include: {
+          enrollments: { where: { status: "ACTIVE" }, select: { id: true }, take: 1 },
         },
       });
-      if (charge.billingMonth.toISOString().slice(0, 7) !== parsed.data.paidOn.slice(0, 7))
-        return null;
+      if (!student.enrollments.length) throw new Error("STUDENT_WITHOUT_ACTIVE_ENROLLMENT");
+      if (parsed.data.month !== parsed.data.paidOn.slice(0, 7)) return null;
+      const charge = await tx.studentMonthlyCharge.findFirst({
+        where: {
+          studentId: parsed.data.studentId,
+          billingMonth: new Date(`${parsed.data.month}-01T00:00:00.000Z`),
+        },
+      });
       const entry = await tx.studentAccountEntry.create({
         data: {
           studentId: parsed.data.studentId,
-          monthlyChargeId: parsed.data.monthlyChargeId,
+          monthlyChargeId: charge?.id,
           paymentRequestId: parsed.data.paymentRequestId,
           entryType: "PAYMENT",
           amount: parsed.data.amount,
+          note: parsed.data.note,
           occurredOn: new Date(parsed.data.paidOn),
           createdByUserId: user.id,
         },
@@ -1169,7 +1175,8 @@ export async function recordStudentPayment(
         entry.id,
         {
           studentId: parsed.data.studentId,
-          monthlyChargeId: parsed.data.monthlyChargeId ?? null,
+          monthlyChargeId: charge?.id ?? null,
+          month: parsed.data.month,
           amount: parsed.data.amount.toString(),
           paidOn: parsed.data.paidOn,
         },
@@ -1177,12 +1184,12 @@ export async function recordStudentPayment(
       return true;
     });
     if (created === null)
-      return actionError("Ödeme tarihi, bağlı aylık tahakkukla aynı ayda olmalıdır.");
+      return actionError("Ödeme tarihi, seçilen ay içinde olmalıdır.");
     if (!created) return actionSuccess("Bu ödeme zaten kaydedilmiş.");
     revalidatePath(`/ogrenciler/${parsed.data.studentId}`);
     revalidatePath("/ogrenciler");
     revalidatePath("/tahsilatlar");
-    return actionSuccess("Ödeme öğrenci bakiyesine eklendi.");
+    return actionSuccess("Ödeme kaydedildi. Bu ay için tahakkuk yoksa ödeme aylık tahsilata dahil edilir; beklenen borç hesaplanmaz.");
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -1296,12 +1303,13 @@ export async function updateStudentPayment(
           amount: { gt: 0 },
         },
       });
-      if (!payment.monthlyChargeId) throw new Error("LEGACY_PAYMENT_NOT_MONTHLY");
-      const charge = await tx.studentMonthlyCharge.findFirstOrThrow({
-        where: { id: payment.monthlyChargeId, studentId: payment.studentId },
-      });
-      if (charge.billingMonth.toISOString().slice(0, 7) !== parsed.data.paidOn.slice(0, 7))
-        throw new Error("PAYMENT_DATE_MONTH_MISMATCH");
+      if (payment.monthlyChargeId) {
+        const charge = await tx.studentMonthlyCharge.findFirstOrThrow({
+          where: { id: payment.monthlyChargeId, studentId: payment.studentId },
+        });
+        if (charge.billingMonth.toISOString().slice(0, 7) !== parsed.data.paidOn.slice(0, 7))
+          throw new Error("PAYMENT_DATE_MONTH_MISMATCH");
+      }
       const updated = await tx.studentAccountEntry.update({
         where: { id: payment.id },
         data: {
@@ -1334,8 +1342,6 @@ export async function updateStudentPayment(
       error.message === "PAYMENT_DATE_MONTH_MISMATCH"
     )
       return actionError("Ödeme tarihi, bağlı aylık tahakkukla aynı ayda olmalıdır.");
-    if (error instanceof Error && error.message === "LEGACY_PAYMENT_NOT_MONTHLY")
-      return actionError("Eski ödeme kayıtları aylık tahsilat ekranından düzenlenemez.");
     return failed("updateStudentPayment", error, "Ödeme güncellenemedi.");
   }
 }
@@ -1360,7 +1366,6 @@ export async function reverseStudentPayment(
           amount: { gt: 0 },
         },
       });
-      if (!payment.monthlyChargeId) throw new Error("LEGACY_PAYMENT_NOT_MONTHLY");
       const reversalExists = await tx.auditLog.findFirst({
         where: {
           action: "STUDENT_PAYMENT_REVERSED",
@@ -1398,8 +1403,6 @@ export async function reverseStudentPayment(
     revalidatePath("/tahsilatlar");
     return actionSuccess("Ödeme iptal edildi; bakiyeye ters kayıt işlendi.");
   } catch (error) {
-    if (error instanceof Error && error.message === "LEGACY_PAYMENT_NOT_MONTHLY")
-      return actionError("Eski ödeme kayıtları aylık tahsilat ekranından iptal edilemez.");
     return failed("reverseStudentPayment", error, "Ödeme iptal edilemedi.");
   }
 }

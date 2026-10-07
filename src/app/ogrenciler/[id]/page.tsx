@@ -387,12 +387,6 @@ export default async function StudentDetailPage({
                 <StudentPaymentDialog
                   studentId={student.id}
                   studentName={`${student.firstName} ${student.lastName}`}
-                  charges={student.monthlyCharges.map((charge) => ({
-                    id: charge.id,
-                    billingMonth: charge.billingMonth.toISOString().slice(0, 7),
-                    expectedAmount: charge.expectedAmount.toString(),
-                  }))}
-                  isAdmin={user.role === "ADMIN"}
                   currentMonth={new Date().toISOString().slice(0, 7)}
                 />
               </div>
@@ -467,6 +461,7 @@ export default async function StudentDetailPage({
                         : entry.entryType === "SESSION_REVERSAL"
                           ? `${entry.enrollment?.course.name ?? "Ders"} · oturum iptali`
                           : `${entry.enrollment?.course.name ?? "Ders"} · gerçekleşen oturum`}
+                      {entry.note ? <p className="text-xs text-muted-foreground">{entry.note}</p> : null}
                     </TableCell>
                     <TableCell
                       className={
