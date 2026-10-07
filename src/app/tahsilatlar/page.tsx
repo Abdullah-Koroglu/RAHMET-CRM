@@ -30,6 +30,7 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
   const params = await searchParams;
   const month = monthInput.catch(new Date().toISOString().slice(0, 7)).parse(single(params.month));
   const billingMonth = monthDate(month);
+  const nextBillingMonth = monthDate(shiftMonth(month, 1));
   const q = boundedQuery(params.q);
   const balanceFilter = z.enum(["DEBT", "CREDIT", "ZERO"]).safeParse(single(params.balance));
   const sort = z.enum(["student", "expected", "paid", "remaining"]).catch("remaining").parse(single(params.sort));
@@ -43,17 +44,33 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
           where: { billingMonth },
           include: { payments: { where: { entryType: "PAYMENT" } } },
         },
+        accountEntries: {
+          where: {
+            entryType: "PAYMENT",
+            monthlyChargeId: null,
+            occurredOn: { gte: billingMonth, lt: nextBillingMonth },
+          },
+        },
       },
       orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
     }),
     db.studentAccountEntry.findMany({
-      where: { entryType: "PAYMENT", monthlyCharge: { billingMonth } },
+      where: {
+        entryType: "PAYMENT",
+        OR: [
+          { monthlyCharge: { billingMonth } },
+          {
+            monthlyChargeId: null,
+            occurredOn: { gte: billingMonth, lt: nextBillingMonth },
+          },
+        ],
+      },
       include: { student: true, monthlyCharge: true },
       orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }],
     }),
     db.studentAccountEntry.groupBy({
       by: ["studentId"],
-      where: { entryType: "PAYMENT", monthlyChargeId: { not: null } },
+      where: { entryType: "PAYMENT" },
       _sum: { amount: true },
     }),
   ]);
@@ -61,12 +78,17 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
   const rows = students.map((student) => {
     const charge = student.monthlyCharges[0] ?? null;
     const expected = charge?.expectedAmount ?? new Prisma.Decimal(0);
-    const paid = charge
+    const chargePaid = charge
       ? charge.payments.reduce((sum, entry) => sum.plus(entry.amount), new Prisma.Decimal(0))
       : new Prisma.Decimal(0);
-    const remaining = Prisma.Decimal.max(new Prisma.Decimal(0), expected.minus(paid));
-    const credit = Prisma.Decimal.max(new Prisma.Decimal(0), paid.minus(expected));
-    return { ...student, charge, expected, paid, remaining, credit, totalPaid: totalPaidByStudent.get(student.id) ?? new Prisma.Decimal(0) };
+    const legacyPaid = student.accountEntries.reduce(
+      (sum, entry) => sum.plus(entry.amount),
+      new Prisma.Decimal(0),
+    );
+    const paid = chargePaid.plus(legacyPaid);
+    const remaining = Prisma.Decimal.max(new Prisma.Decimal(0), expected.minus(chargePaid));
+    const credit = Prisma.Decimal.max(new Prisma.Decimal(0), chargePaid.minus(expected));
+    return { ...student, charge, expected, paid, legacyPaid, remaining, credit, totalPaid: totalPaidByStudent.get(student.id) ?? new Prisma.Decimal(0) };
   });
   const filteredRows = rows.filter((row) => {
     const fullName = `${row.firstName} ${row.lastName}`.toLocaleLowerCase("tr-TR");
@@ -91,7 +113,7 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
   const query = { q, balance: balanceFilter.success ? balanceFilter.data : "ALL", month };
 
   return <div className="space-y-6">
-    <PageHeader title="Tahsilatlar" description="Öğrenci ödemeleri ödeme tarihinin ait olduğu aya otomatik yansır; aylık toplamlar ödeme kayıtlarından hesaplanır." actions={user.role === "ADMIN" ? <BulkMonthlyChargeDialog month={month} /> : undefined} />
+    <PageHeader title="Tahsilatlar" description="Aylık toplamlar, seçilen ayın aylık tahakkuka bağlı ve önceki sistemden gelen geçerli ödeme hareketlerinden veritabanında hesaplanır." actions={user.role === "ADMIN" ? <BulkMonthlyChargeDialog month={month} /> : undefined} />
     <Card><CardContent className="pt-6">
       <form className="mb-5 grid gap-3 sm:grid-cols-[auto_160px_1fr_180px_auto] sm:items-end">
         <Button variant="outline" render={<Link href={{ pathname: "/tahsilatlar", query: { ...query, month: shiftMonth(month, -1) } }} />}>Önceki ay</Button>
@@ -110,7 +132,7 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
     <Card><CardHeader><CardTitle>Aylık öğrenci özeti</CardTitle></CardHeader><CardContent>
       <Table><TableHeader><TableRow>{[["student", "Öğrenci"], ["expected", "Aylık beklenen"], ["paid", "Aylık ödenen"], ["remaining", "Kalan borç"]].map(([value, label]) => <TableHead key={value} className={value === "student" ? undefined : "text-right"}><TableSortLink href={{ pathname: "/tahsilatlar", query: { ...query, sort: value, direction: sort === value && direction === "asc" ? "desc" : "asc" } }} active={sort === value} direction={direction}>{label}</TableSortLink></TableHead>)}<TableHead className="text-right">Toplam ödeme</TableHead><TableHead className="text-right">İşlem</TableHead></TableRow></TableHeader>
         <TableBody>{filteredRows.map((row) => <TableRow key={row.id}>
-          <TableCell><Link className="font-medium hover:underline" href={`/ogrenciler/${row.id}`}>{row.firstName} {row.lastName}</Link>{row.credit.greaterThan(0) ? <p className="text-xs text-emerald-700">Fazla ödeme: {formatMoney(row.credit)}</p> : null}</TableCell>
+          <TableCell><Link className="font-medium hover:underline" href={`/ogrenciler/${row.id}`}>{row.firstName} {row.lastName}</Link>{row.legacyPaid.greaterThan(0) ? <p className="text-xs text-muted-foreground">Önceki sistem tahsilatı: {formatMoney(row.legacyPaid)}</p> : null}{row.credit.greaterThan(0) ? <p className="text-xs text-emerald-700">Fazla ödeme: {formatMoney(row.credit)}</p> : null}</TableCell>
           <TableCell className="text-right">{formatMoney(row.expected)}</TableCell><TableCell className="text-right text-emerald-700">{formatMoney(row.paid)}</TableCell><TableCell className={row.remaining.greaterThan(0) ? "text-right font-medium text-destructive" : "text-right font-medium"}>{formatMoney(row.remaining)}</TableCell><TableCell className="text-right font-medium">{formatMoney(row.totalPaid)}</TableCell>
           <TableCell className="text-right"><div className="flex flex-wrap justify-end gap-2">{user.role === "ADMIN" ? <MonthlyChargeDialog studentId={row.id} studentName={`${row.firstName} ${row.lastName}`} month={month} expectedAmount={row.charge?.expectedAmount.toString()} note={row.charge?.note} /> : null}{row.charge && canMutateOperations(user.role) ? <MonthlyPaymentDialog studentId={row.id} studentName={`${row.firstName} ${row.lastName}`} monthlyChargeId={row.charge.id} month={month} today={paymentDate} /> : null}</div></TableCell>
         </TableRow>)}</TableBody></Table>
@@ -120,7 +142,7 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
       <Table><TableHeader><TableRow><TableHead>Öğrenci</TableHead><TableHead>Ödeme tarihi</TableHead><TableHead>İlgili ay</TableHead><TableHead className="text-right">Tutar</TableHead><TableHead className="text-right">İşlem</TableHead></TableRow></TableHeader>
         <TableBody>{filteredPayments.map((entry) => <TableRow key={entry.id}>
           <TableCell><Link className="font-medium hover:underline" href={`/ogrenciler/${entry.student.id}`}>{entry.student.firstName} {entry.student.lastName}</Link></TableCell>
-          <TableCell>{formatDate(entry.occurredOn)}</TableCell><TableCell>{entry.monthlyCharge?.billingMonth.toISOString().slice(0, 7) ?? "—"}</TableCell><TableCell className={entry.amount.greaterThanOrEqualTo(0) ? "text-right font-medium text-emerald-700" : "text-right font-medium text-destructive"}>{formatMoney(entry.amount)}</TableCell>
+          <TableCell>{formatDate(entry.occurredOn)}</TableCell><TableCell>{entry.monthlyCharge?.billingMonth.toISOString().slice(0, 7) ?? entry.occurredOn.toISOString().slice(0, 7)}</TableCell><TableCell className={entry.amount.greaterThanOrEqualTo(0) ? "text-right font-medium text-emerald-700" : "text-right font-medium text-destructive"}>{formatMoney(entry.amount)}</TableCell>
           <TableCell className="text-right">{user.role === "ADMIN" && entry.amount.greaterThan(0) ? <PaymentActionsDialog entryId={entry.id} studentId={entry.studentId} amount={entry.amount.toString()} paidOn={entry.occurredOn.toISOString().slice(0, 10)} /> : entry.amount.lessThan(0) ? <span className="text-muted-foreground">İptal kaydı</span> : "—"}</TableCell>
         </TableRow>)}</TableBody></Table>
       {!filteredPayments.length ? <p className="py-8 text-center text-sm text-muted-foreground">Bu ay için tahsilat kaydı yok.</p> : null}
