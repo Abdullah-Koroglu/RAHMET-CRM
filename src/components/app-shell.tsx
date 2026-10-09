@@ -44,3 +44,4 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
     </div>
   );
 }
+  { href: "/akademiler", label: "Akademiler", icon: GraduationCap },

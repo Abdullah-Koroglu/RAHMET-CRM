@@ -45,6 +45,8 @@ const paymentReversalSchema = z.object({
 });
 const formValue = (formData: FormData, key: string) =>
   String(formData.get(key) ?? "");
+const academySlug = (academy: "PRIMARY" | "MIDDLE" | "HIGH") =>
+  ({ PRIMARY: "ilkokul", MIDDLE: "ortaokul", HIGH: "lise" })[academy];
 
 const academicYearSchema = z
   .object({
@@ -103,6 +105,28 @@ const studentProfileSchema = z.object({
   classLevel: optionalText(100),
 });
 
+const academyEnrollmentSchema = z.object({
+  academy: z.enum(["PRIMARY", "MIDDLE", "HIGH"]),
+  firstName: requiredText(100),
+  lastName: requiredText(100),
+  studentPhone: optionalText(50),
+  classLevel: optionalText(100),
+  guardianFirstName: requiredText(100),
+  guardianLastName: requiredText(100),
+  guardianRelationship: requiredText(50),
+  guardianPhone: requiredText(50),
+  feeAmount: money,
+});
+
+const academyPaymentSchema = z.object({
+  enrollmentId: id,
+  amount: money.refine((value) => value.greaterThan(0), {
+    message: "Ödeme tutarı sıfırdan büyük olmalıdır.",
+  }),
+  paidOn: z.string().date(),
+  note: optionalText(500),
+});
+
 async function secure<T>(
   roles: ("ADMIN" | "OPERATOR" | "VIEWER")[],
   operation: () => Promise<T>,
@@ -126,6 +150,115 @@ async function failed(action: string, error: unknown, message?: string) {
     requestId,
   });
   return actionError(message);
+}
+
+export async function createAcademyEnrollment(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = academyEnrollmentSchema.safeParse({
+    academy: formValue(formData, "academy"),
+    firstName: formValue(formData, "firstName"),
+    lastName: formValue(formData, "lastName"),
+    studentPhone: formValue(formData, "studentPhone"),
+    classLevel: formValue(formData, "classLevel"),
+    guardianFirstName: formValue(formData, "guardianFirstName"),
+    guardianLastName: formValue(formData, "guardianLastName"),
+    guardianRelationship: formValue(formData, "guardianRelationship"),
+    guardianPhone: formValue(formData, "guardianPhone"),
+    feeAmount: formValue(formData, "feeAmount"),
+  });
+  if (!parsed.success)
+    return actionError(parsed.error.issues[0]?.message ?? invalid().message);
+
+  const guardianPhone = normalizePhone(parsed.data.guardianPhone);
+  const studentPhone = parsed.data.studentPhone
+    ? normalizePhone(parsed.data.studentPhone)
+    : null;
+  if (!guardianPhone || (parsed.data.studentPhone && !studentPhone))
+    return actionError("Geçerli bir Türkiye telefon numarası girin.");
+
+  try {
+    const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
+    await db.$transaction(async (tx) => {
+      const student = await tx.student.create({
+        data: {
+          firstName: parsed.data.firstName,
+          lastName: parsed.data.lastName,
+          phone: studentPhone,
+          classLevel: parsed.data.classLevel,
+        },
+      });
+      await tx.guardian.create({
+        data: {
+          studentId: student.id,
+          firstName: parsed.data.guardianFirstName,
+          lastName: parsed.data.guardianLastName,
+          relationship: parsed.data.guardianRelationship,
+          phone: guardianPhone,
+        },
+      });
+      const enrollment = await tx.academyEnrollment.create({
+        data: {
+          studentId: student.id,
+          academy: parsed.data.academy,
+          feeAmount: parsed.data.feeAmount,
+        },
+      });
+      await writeAudit(tx, user.id, "ACADEMY_ENROLLMENT_CREATED", "AcademyEnrollment", enrollment.id, {
+        academy: enrollment.academy,
+        studentId: student.id,
+        feeAmount: enrollment.feeAmount.toString(),
+      });
+    });
+    revalidatePath("/akademiler");
+    revalidatePath(`/akademiler/${academySlug(parsed.data.academy)}`);
+    revalidatePath("/ogrenciler");
+    return actionSuccess("Öğrenci ve veli kaydı akademiye eklendi.");
+  } catch (error) {
+    return failed("createAcademyEnrollment", error, "Akademi kaydı oluşturulamadı.");
+  }
+}
+
+export async function recordAcademyPayment(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = academyPaymentSchema.safeParse({
+    enrollmentId: formValue(formData, "enrollmentId"),
+    amount: formValue(formData, "amount"),
+    paidOn: formValue(formData, "paidOn"),
+    note: formValue(formData, "note"),
+  });
+  if (!parsed.success)
+    return actionError(parsed.error.issues[0]?.message ?? invalid().message);
+  try {
+    const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
+    const academy = await db.$transaction(async (tx) => {
+      const enrollment = await tx.academyEnrollment.findUniqueOrThrow({
+        where: { id: parsed.data.enrollmentId },
+      });
+      const payment = await tx.academyPayment.create({
+        data: {
+          academyEnrollmentId: enrollment.id,
+          amount: parsed.data.amount,
+          paidOn: new Date(parsed.data.paidOn),
+          note: parsed.data.note,
+          createdByUserId: user.id,
+        },
+      });
+      await writeAudit(tx, user.id, "ACADEMY_PAYMENT_RECORDED", "AcademyPayment", payment.id, {
+        academyEnrollmentId: enrollment.id,
+        amount: payment.amount.toString(),
+      });
+      return enrollment.academy;
+    });
+    revalidatePath("/akademiler");
+    revalidatePath(`/akademiler/${academySlug(academy)}`);
+    return actionSuccess("Akademi ödemesi kaydedildi.");
+  } catch (error) {
+    return failed("recordAcademyPayment", error, "Ödeme kaydedilemedi.");
+  }
 }
 
 export async function createAcademicYear(

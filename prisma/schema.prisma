@@ -93,6 +93,14 @@ enum StudentAccountEntryType {
   @@schema("rahmet_crm")
 }
 
+enum AcademyType {
+  PRIMARY
+  MIDDLE
+  HIGH
+
+  @@schema("rahmet_crm")
+}
+
 enum IntegrationStatus {
   RECEIVED
   PROCESSED
@@ -136,6 +144,7 @@ model AppUser {
   auditLogs                AuditLog[]
   accountEntries           StudentAccountEntry[]
   monthlyCharges           StudentMonthlyCharge[]     @relation("MonthlyChargeCreatedBy")
+  academyPayments          AcademyPayment[]
   createdAt                DateTime                     @default(now()) @map("created_at")
   updatedAt                DateTime                     @updatedAt @map("updated_at")
 
@@ -320,10 +329,61 @@ model Student {
   conversions PreRegistrationConversion[]
   accountEntries StudentAccountEntry[]
   monthlyCharges  StudentMonthlyCharge[]
+  guardians       Guardian[]
+  academyEnrollments AcademyEnrollment[]
   createdAt   DateTime                    @default(now()) @map("created_at")
 
   @@index([phone])
   @@map("student")
+  @@schema("rahmet_crm")
+}
+
+model Guardian {
+  id           String   @id @default(uuid()) @db.Uuid
+  studentId    String   @map("student_id") @db.Uuid
+  firstName    String   @map("first_name")
+  lastName     String   @map("last_name")
+  relationship String
+  phone        String
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([studentId])
+  @@map("guardian")
+  @@schema("rahmet_crm")
+}
+
+model AcademyEnrollment {
+  id          String       @id @default(uuid()) @db.Uuid
+  studentId   String       @map("student_id") @db.Uuid
+  academy     AcademyType
+  feeAmount   Decimal      @map("fee_amount") @db.Decimal(12, 2)
+  isActive    Boolean      @default(true) @map("is_active")
+  student     Student      @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  payments    AcademyPayment[]
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  @@unique([studentId, academy])
+  @@index([academy, isActive])
+  @@map("academy_enrollment")
+  @@schema("rahmet_crm")
+}
+
+model AcademyPayment {
+  id                  String            @id @default(uuid()) @db.Uuid
+  academyEnrollmentId String            @map("academy_enrollment_id") @db.Uuid
+  amount              Decimal           @db.Decimal(12, 2)
+  paidOn              DateTime          @map("paid_on") @db.Date
+  note                String?
+  createdByUserId     String            @map("created_by_user_id") @db.Uuid
+  enrollment          AcademyEnrollment @relation(fields: [academyEnrollmentId], references: [id], onDelete: Restrict)
+  createdBy           AppUser           @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt           DateTime          @default(now()) @map("created_at")
+
+  @@index([academyEnrollmentId, paidOn])
+  @@map("academy_payment")
   @@schema("rahmet_crm")
 }
 

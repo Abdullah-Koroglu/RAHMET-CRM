@@ -30,6 +30,9 @@ export default async function StudentsPage({
   const params = await searchParams;
   const q = boundedQuery(params.q);
   const courseId = z.string().uuid().safeParse(single(params.courseId));
+  const academy = z
+    .enum(["PRIMARY", "MIDDLE", "HIGH"])
+    .safeParse(single(params.academy));
   const sort = z
     .enum(["name", "phone", "district", "courses"])
     .catch("name")
@@ -42,6 +45,9 @@ export default async function StudentsPage({
   const where = {
     ...(courseId.success
       ? { enrollments: { some: { courseId: courseId.data } } }
+      : {}),
+    ...(academy.success
+      ? { academyEnrollments: { some: { academy: academy.data, isActive: true } } }
       : {}),
     ...(q
       ? {
@@ -56,7 +62,11 @@ export default async function StudentsPage({
   const [students, total, courses] = await Promise.all([
     db.student.findMany({
       where,
-      include: { enrollments: { include: { course: true } } },
+      include: {
+        enrollments: { include: { course: true } },
+        guardians: true,
+        academyEnrollments: { where: { isActive: true } },
+      },
       orderBy:
         sort === "district"
           ? [{ district: direction }, { firstName: "asc" }]
@@ -89,6 +99,7 @@ export default async function StudentsPage({
   const filterParams = {
     q,
     courseId: courseId.success ? courseId.data : "ALL",
+    academy: academy.success ? academy.data : "ALL",
     sort,
     direction,
   };
@@ -100,7 +111,7 @@ export default async function StudentsPage({
       />
       <Card>
         <CardContent className="pt-6">
-          <form className="mb-5 grid gap-3 md:grid-cols-[1fr_220px_auto] md:items-end">
+          <form className="mb-5 grid gap-3 md:grid-cols-[1fr_180px_180px_auto] md:items-end">
             <div className="flex-1 space-y-2">
               <Label htmlFor="student-search">Ad soyad veya telefon</Label>
               <Input
@@ -109,6 +120,20 @@ export default async function StudentsPage({
                 defaultValue={q}
                 maxLength={100}
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="student-academy">Akademi</Label>
+              <select
+                id="student-academy"
+                name="academy"
+                defaultValue={academy.success ? academy.data : "ALL"}
+                className="h-8 w-full rounded-lg border bg-transparent px-2 text-sm"
+              >
+                <option value="ALL">Tüm akademiler</option>
+                <option value="PRIMARY">İlkokul Akademi</option>
+                <option value="MIDDLE">Ortaokul Akademi</option>
+                <option value="HIGH">Lise Akademi</option>
+              </select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="student-course">Ders</Label>
@@ -150,6 +175,8 @@ export default async function StudentsPage({
                     Öğrenci
                   </TableSortLink>
                 </TableHead>
+                <TableHead>Akademi</TableHead>
+                <TableHead>Veli</TableHead>
                 <TableHead>
                   <TableSortLink
                     href={{
@@ -217,6 +244,16 @@ export default async function StudentsPage({
                   <TableCell>{student.phone ?? "—"}</TableCell>
                   <TableCell>{student.district ?? "—"}</TableCell>
                   <TableCell>
+                    {student.academyEnrollments
+                      .map((enrollment) => academyLabels[enrollment.academy])
+                      .join(", ") || "—"}
+                  </TableCell>
+                  <TableCell>
+                    {student.guardians
+                      .map((guardian) => `${guardian.firstName} ${guardian.lastName}`)
+                      .join(", ") || "—"}
+                  </TableCell>
+                  <TableCell>
                     {student.enrollments
                       .map((enrollment) => enrollment.course.name)
                       .join(", ") || "—"}
@@ -242,3 +279,9 @@ export default async function StudentsPage({
     </div>
   );
 }
+
+const academyLabels = {
+  PRIMARY: "İlkokul",
+  MIDDLE: "Ortaokul",
+  HIGH: "Lise",
+};
