@@ -42,6 +42,7 @@ export default async function StudentsPage({
     .catch("asc")
     .parse(single(params.direction));
   const { page, pageSize, skip } = pagination(params);
+  const searchTerms = q?.split(/\s+/).filter(Boolean) ?? [];
   const where = {
     ...(courseId.success
       ? { enrollments: { some: { courseId: courseId.data } } }
@@ -52,9 +53,15 @@ export default async function StudentsPage({
     ...(q
       ? {
           OR: [
-            { firstName: { contains: q, mode: "insensitive" as const } },
-            { lastName: { contains: q, mode: "insensitive" as const } },
             { phone: { contains: q } },
+            {
+              AND: searchTerms.map((term) => ({
+                OR: [
+                  { firstName: { contains: term, mode: "insensitive" as const } },
+                  { lastName: { contains: term, mode: "insensitive" as const } },
+                ],
+              })),
+            },
           ],
         }
       : {}),
