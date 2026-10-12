@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 
 const nav = [
   { href: "/", label: "Genel görünüm", icon: LayoutDashboard },
+  { href: "/akademiler", label: "Akademiler", icon: GraduationCap },
   { href: "/dersler", label: "Dersler", icon: BookOpen },
   { href: "/on-kayitlar", label: "Ön kayıtlar", icon: UsersRound },
   { href: "/ogrenciler", label: "Öğrenciler", icon: GraduationCap },
@@ -44,4 +45,3 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
     </div>
   );
 }
-  { href: "/akademiler", label: "Akademiler", icon: GraduationCap },
