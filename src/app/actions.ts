@@ -1314,6 +1314,29 @@ export async function recordStudentPayment(
             expectedAmount: derivedExpectedAmount.toString(),
           },
         );
+      } else if (
+        charge &&
+        charge.note === "Aktif kesin kayıt ücretlerinden otomatik oluşturuldu." &&
+        derivedExpectedAmount.greaterThan(charge.expectedAmount)
+      ) {
+        const previousExpectedAmount = charge.expectedAmount;
+        charge = await tx.studentMonthlyCharge.update({
+          where: { id: charge.id },
+          data: { expectedAmount: derivedExpectedAmount },
+        });
+        await writeAudit(
+          tx,
+          user.id,
+          "STUDENT_MONTHLY_CHARGE_AUTO_UPDATED",
+          "StudentMonthlyCharge",
+          charge.id,
+          {
+            studentId: parsed.data.studentId,
+            month: parsed.data.month,
+            previousExpectedAmount: previousExpectedAmount.toString(),
+            expectedAmount: derivedExpectedAmount.toString(),
+          },
+        );
       }
       const entry = await tx.studentAccountEntry.create({
         data: {

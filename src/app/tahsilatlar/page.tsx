@@ -85,7 +85,13 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
       (sum, enrollment) => sum.plus(enrollment.agreedFeeAmount),
       new Prisma.Decimal(0),
     );
-    const expected = charge?.expectedAmount ?? derivedExpected;
+    // A stored monthly charge can have been created before another active
+    // enrollment was added. Never let that older snapshot turn a valid course
+    // fee into a false "overpayment" in the current monthly view.
+    const expected = Prisma.Decimal.max(
+      charge?.expectedAmount ?? new Prisma.Decimal(0),
+      derivedExpected,
+    );
     const expectedConfigured = expected.greaterThan(0);
     const chargePaid = charge
       ? charge.payments.reduce((sum, entry) => sum.plus(entry.amount), new Prisma.Decimal(0))
