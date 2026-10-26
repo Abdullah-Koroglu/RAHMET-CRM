@@ -1,6 +1,6 @@
 "use client";
 
-import { createAcademyEnrollment, recordAcademyPayment } from "@/app/actions";
+import { createAcademyEnrollment, recordAcademyPayment, updateAcademyEnrollment } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -13,6 +13,19 @@ export function AcademyEnrollmentDialog({ academy, academyName }: { academy: "PR
 
 export function AcademyPaymentDialog({ enrollmentId, studentName }: { enrollmentId: string; studentName: string }) {
   return <Dialog><DialogTrigger render={<Button variant="outline" size="sm" />}>Ödeme al</DialogTrigger><DialogContent><DialogHeader><DialogTitle>Akademi ödemesi</DialogTitle><DialogDescription>{studentName} için tahsilat kaydı oluşturun.</DialogDescription></DialogHeader><ActionForm action={recordAcademyPayment} className="grid gap-4"><input type="hidden" name="enrollmentId" value={enrollmentId} /><Field label="Tutar (TL)" name="amount" type="number" min="0.01" step="0.01" required /><Field label="Ödeme tarihi" name="paidOn" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required /><div className="space-y-2"><Label htmlFor={`payment-note-${enrollmentId}`}>Not</Label><Input id={`payment-note-${enrollmentId}`} name="note" maxLength={500} placeholder="Opsiyonel" /></div><Button type="submit">Ödemeyi kaydet</Button></ActionForm></DialogContent></Dialog>;
+}
+
+type AcademyEnrollmentEditDialogProps = {
+  academy: "PRIMARY" | "MIDDLE" | "HIGH";
+  academyName: string;
+  enrollmentId: string;
+  student: { firstName: string; lastName: string; phone: string | null; classLevel: string | null };
+  guardian: { id: string; firstName: string; lastName: string; relationship: string; phone: string } | null;
+  feeAmount: string;
+};
+
+export function AcademyEnrollmentEditDialog({ academy, academyName, enrollmentId, student, guardian, feeAmount }: AcademyEnrollmentEditDialogProps) {
+  return <Dialog><DialogTrigger render={<Button variant="outline" size="sm" />}>Düzenle</DialogTrigger><DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{academyName} kaydını düzenle</DialogTitle><DialogDescription>Öğrenci, veli ve toplam akademi ücretini güncelleyin.</DialogDescription></DialogHeader><ActionForm action={updateAcademyEnrollment} className="grid gap-4 sm:grid-cols-2"><input type="hidden" name="enrollmentId" value={enrollmentId} /><input type="hidden" name="academy" value={academy} /><input type="hidden" name="guardianId" value={guardian?.id ?? ""} /><div className="sm:col-span-2"><p className="text-sm font-medium">Öğrenci bilgileri</p></div><Field label="Öğrenci adı" name="firstName" required defaultValue={student.firstName} /><Field label="Öğrenci soyadı" name="lastName" required defaultValue={student.lastName} /><Field label="Öğrenci telefonu" name="studentPhone" type="tel" placeholder="Opsiyonel" defaultValue={student.phone ?? ""} /><Field label="Sınıf seviyesi" name="classLevel" placeholder="Örn. 5. sınıf" defaultValue={student.classLevel ?? ""} /><div className="sm:col-span-2 mt-2"><p className="text-sm font-medium">Veli bilgileri</p></div><Field label="Veli adı" name="guardianFirstName" required defaultValue={guardian?.firstName ?? ""} /><Field label="Veli soyadı" name="guardianLastName" required defaultValue={guardian?.lastName ?? ""} /><Field label="Yakınlık derecesi" name="guardianRelationship" required defaultValue={guardian?.relationship ?? ""} /><Field label="Veli telefonu" name="guardianPhone" type="tel" required defaultValue={guardian?.phone ?? ""} /><div className="sm:col-span-2 mt-2"><Field label="Toplam akademi ücreti (TL)" name="feeAmount" type="number" min="0" step="0.01" required defaultValue={feeAmount} /></div><div className="sm:col-span-2"><Button type="submit" className="w-full">Değişiklikleri kaydet</Button></div></ActionForm></DialogContent></Dialog>;
 }
 
 function Field({ label, name, type = "text", required = false, placeholder, min, step, defaultValue }: { label: string; name: string; type?: string; required?: boolean; placeholder?: string; min?: string; step?: string; defaultValue?: string }) {

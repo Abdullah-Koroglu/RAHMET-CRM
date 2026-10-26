@@ -118,6 +118,11 @@ const academyEnrollmentSchema = z.object({
   feeAmount: money,
 });
 
+const academyEnrollmentUpdateSchema = academyEnrollmentSchema.extend({
+  enrollmentId: id,
+  guardianId: id.optional(),
+});
+
 const academyPaymentSchema = z.object({
   enrollmentId: id,
   amount: money.refine((value) => value.greaterThan(0), {
@@ -217,6 +222,104 @@ export async function createAcademyEnrollment(
     return actionSuccess("Öğrenci ve veli kaydı akademiye eklendi.");
   } catch (error) {
     return failed("createAcademyEnrollment", error, "Akademi kaydı oluşturulamadı.");
+  }
+}
+
+export async function updateAcademyEnrollment(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = academyEnrollmentUpdateSchema.safeParse({
+    enrollmentId: formValue(formData, "enrollmentId"),
+    academy: formValue(formData, "academy"),
+    firstName: formValue(formData, "firstName"),
+    lastName: formValue(formData, "lastName"),
+    studentPhone: formValue(formData, "studentPhone"),
+    classLevel: formValue(formData, "classLevel"),
+    guardianId: formValue(formData, "guardianId") || undefined,
+    guardianFirstName: formValue(formData, "guardianFirstName"),
+    guardianLastName: formValue(formData, "guardianLastName"),
+    guardianRelationship: formValue(formData, "guardianRelationship"),
+    guardianPhone: formValue(formData, "guardianPhone"),
+    feeAmount: formValue(formData, "feeAmount"),
+  });
+  if (!parsed.success)
+    return actionError(parsed.error.issues[0]?.message ?? invalid().message);
+
+  const guardianPhone = normalizePhone(parsed.data.guardianPhone);
+  const studentPhone = parsed.data.studentPhone
+    ? normalizePhone(parsed.data.studentPhone)
+    : null;
+  if (!guardianPhone || (parsed.data.studentPhone && !studentPhone))
+    return actionError("Geçerli bir Türkiye telefon numarası girin.");
+
+  try {
+    const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
+    const updatedEnrollment = await db.$transaction(async (tx) => {
+      const enrollment = await tx.academyEnrollment.findUniqueOrThrow({
+        where: { id: parsed.data.enrollmentId },
+        include: { student: { include: { guardians: true } } },
+      });
+      if (enrollment.academy !== parsed.data.academy)
+        throw new Error("Akademi kaydı eşleşmiyor.");
+
+      const guardian = parsed.data.guardianId
+        ? enrollment.student.guardians.find(
+            (item) => item.id === parsed.data.guardianId,
+          )
+        : enrollment.student.guardians[0];
+
+      await tx.student.update({
+        where: { id: enrollment.studentId },
+        data: {
+          firstName: parsed.data.firstName,
+          lastName: parsed.data.lastName,
+          phone: studentPhone,
+          classLevel: parsed.data.classLevel,
+        },
+      });
+      if (guardian) {
+        await tx.guardian.update({
+          where: { id: guardian.id },
+          data: {
+            firstName: parsed.data.guardianFirstName,
+            lastName: parsed.data.guardianLastName,
+            relationship: parsed.data.guardianRelationship,
+            phone: guardianPhone,
+          },
+        });
+      } else {
+        await tx.guardian.create({
+          data: {
+            studentId: enrollment.studentId,
+            firstName: parsed.data.guardianFirstName,
+            lastName: parsed.data.guardianLastName,
+            relationship: parsed.data.guardianRelationship,
+            phone: guardianPhone,
+          },
+        });
+      }
+      await tx.academyEnrollment.update({
+        where: { id: enrollment.id },
+        data: { feeAmount: parsed.data.feeAmount },
+      });
+      await writeAudit(
+        tx,
+        user.id,
+        "ACADEMY_ENROLLMENT_UPDATED",
+        "AcademyEnrollment",
+        enrollment.id,
+        { academy: enrollment.academy, studentId: enrollment.studentId },
+      );
+      return enrollment;
+    });
+    revalidatePath("/akademiler");
+    revalidatePath(`/akademiler/${academySlug(parsed.data.academy)}`);
+    revalidatePath(`/ogrenciler/${updatedEnrollment.studentId}`);
+    revalidatePath("/ogrenciler");
+    return actionSuccess("Akademi öğrenci kaydı güncellendi.");
+  } catch (error) {
+    return failed("updateAcademyEnrollment", error, "Akademi kaydı güncellenemedi.");
   }
 }
 
