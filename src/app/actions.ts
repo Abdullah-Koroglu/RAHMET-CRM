@@ -1433,7 +1433,7 @@ export async function recordStudentPayment(
       } else if (
         charge &&
         charge.note === "Aktif kesin kayıt ücretlerinden otomatik oluşturuldu." &&
-        derivedExpectedAmount.greaterThan(charge.expectedAmount)
+        !derivedExpectedAmount.equals(charge.expectedAmount)
       ) {
         const previousExpectedAmount = charge.expectedAmount;
         charge = await tx.studentMonthlyCharge.update({
