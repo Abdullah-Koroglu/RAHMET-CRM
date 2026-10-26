@@ -45,7 +45,7 @@ const paymentReversalSchema = z.object({
 });
 const formValue = (formData: FormData, key: string) =>
   String(formData.get(key) ?? "");
-const normalizeOptionalGuardianPhone = (value: string | null) => {
+const normalizeOptionalPhone = (value: string | null) => {
   if (!value) return null;
   if (value === "0000") return value;
   return normalizePhone(value);
@@ -187,9 +187,9 @@ export async function createAcademyEnrollment(
   if (!parsed.success)
     return actionError(parsed.error.issues[0]?.message ?? invalid().message);
 
-  const guardianPhone = normalizeOptionalGuardianPhone(parsed.data.guardianPhone);
+  const guardianPhone = normalizeOptionalPhone(parsed.data.guardianPhone);
   const studentPhone = parsed.data.studentPhone
-    ? normalizePhone(parsed.data.studentPhone)
+    ? normalizeOptionalPhone(parsed.data.studentPhone)
     : null;
   if ((parsed.data.guardianPhone && !guardianPhone) || (parsed.data.studentPhone && !studentPhone))
     return actionError("Geçerli bir Türkiye telefon numarası girin.");
@@ -259,9 +259,9 @@ export async function updateAcademyEnrollment(
   if (!parsed.success)
     return actionError(parsed.error.issues[0]?.message ?? invalid().message);
 
-  const guardianPhone = normalizeOptionalGuardianPhone(parsed.data.guardianPhone);
+  const guardianPhone = normalizeOptionalPhone(parsed.data.guardianPhone);
   const studentPhone = parsed.data.studentPhone
-    ? normalizePhone(parsed.data.studentPhone)
+    ? normalizeOptionalPhone(parsed.data.studentPhone)
     : null;
   if ((parsed.data.guardianPhone && !guardianPhone) || (parsed.data.studentPhone && !studentPhone))
     return actionError("Geçerli bir Türkiye telefon numarası girin.");
