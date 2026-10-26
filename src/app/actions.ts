@@ -45,6 +45,17 @@ const paymentReversalSchema = z.object({
 });
 const formValue = (formData: FormData, key: string) =>
   String(formData.get(key) ?? "");
+const normalizeOptionalGuardianPhone = (value: string | null) => {
+  if (!value) return null;
+  if (value === "0000") return value;
+  return normalizePhone(value);
+};
+const hasGuardianDetails = (value: {
+  guardianFirstName: string | null;
+  guardianLastName: string | null;
+  guardianRelationship: string | null;
+  guardianPhone: string | null;
+}) => Object.values(value).some(Boolean);
 const academySlug = (academy: "PRIMARY" | "MIDDLE" | "HIGH") =>
   ({ PRIMARY: "ilkokul", MIDDLE: "ortaokul", HIGH: "lise" })[academy];
 
@@ -111,10 +122,10 @@ const academyEnrollmentSchema = z.object({
   lastName: requiredText(100),
   studentPhone: optionalText(50),
   classLevel: optionalText(100),
-  guardianFirstName: requiredText(100),
-  guardianLastName: requiredText(100),
-  guardianRelationship: requiredText(50),
-  guardianPhone: requiredText(50),
+  guardianFirstName: optionalText(100),
+  guardianLastName: optionalText(100),
+  guardianRelationship: optionalText(50),
+  guardianPhone: optionalText(50),
   feeAmount: money,
 });
 
@@ -176,11 +187,11 @@ export async function createAcademyEnrollment(
   if (!parsed.success)
     return actionError(parsed.error.issues[0]?.message ?? invalid().message);
 
-  const guardianPhone = normalizePhone(parsed.data.guardianPhone);
+  const guardianPhone = normalizeOptionalGuardianPhone(parsed.data.guardianPhone);
   const studentPhone = parsed.data.studentPhone
     ? normalizePhone(parsed.data.studentPhone)
     : null;
-  if (!guardianPhone || (parsed.data.studentPhone && !studentPhone))
+  if ((parsed.data.guardianPhone && !guardianPhone) || (parsed.data.studentPhone && !studentPhone))
     return actionError("Geçerli bir Türkiye telefon numarası girin.");
 
   try {
@@ -194,15 +205,17 @@ export async function createAcademyEnrollment(
           classLevel: parsed.data.classLevel,
         },
       });
-      await tx.guardian.create({
-        data: {
-          studentId: student.id,
-          firstName: parsed.data.guardianFirstName,
-          lastName: parsed.data.guardianLastName,
-          relationship: parsed.data.guardianRelationship,
-          phone: guardianPhone,
-        },
-      });
+      if (hasGuardianDetails(parsed.data)) {
+        await tx.guardian.create({
+          data: {
+            studentId: student.id,
+            firstName: parsed.data.guardianFirstName ?? "Bilinmiyor",
+            lastName: parsed.data.guardianLastName ?? "Bilinmiyor",
+            relationship: parsed.data.guardianRelationship ?? "Belirsiz",
+            phone: guardianPhone ?? "0000",
+          },
+        });
+      }
       const enrollment = await tx.academyEnrollment.create({
         data: {
           studentId: student.id,
@@ -246,11 +259,11 @@ export async function updateAcademyEnrollment(
   if (!parsed.success)
     return actionError(parsed.error.issues[0]?.message ?? invalid().message);
 
-  const guardianPhone = normalizePhone(parsed.data.guardianPhone);
+  const guardianPhone = normalizeOptionalGuardianPhone(parsed.data.guardianPhone);
   const studentPhone = parsed.data.studentPhone
     ? normalizePhone(parsed.data.studentPhone)
     : null;
-  if (!guardianPhone || (parsed.data.studentPhone && !studentPhone))
+  if ((parsed.data.guardianPhone && !guardianPhone) || (parsed.data.studentPhone && !studentPhone))
     return actionError("Geçerli bir Türkiye telefon numarası girin.");
 
   try {
@@ -282,20 +295,20 @@ export async function updateAcademyEnrollment(
         await tx.guardian.update({
           where: { id: guardian.id },
           data: {
-            firstName: parsed.data.guardianFirstName,
-            lastName: parsed.data.guardianLastName,
-            relationship: parsed.data.guardianRelationship,
-            phone: guardianPhone,
+            firstName: parsed.data.guardianFirstName ?? guardian.firstName,
+            lastName: parsed.data.guardianLastName ?? guardian.lastName,
+            relationship: parsed.data.guardianRelationship ?? guardian.relationship,
+            phone: guardianPhone ?? guardian.phone,
           },
         });
-      } else {
+      } else if (hasGuardianDetails(parsed.data)) {
         await tx.guardian.create({
           data: {
             studentId: enrollment.studentId,
-            firstName: parsed.data.guardianFirstName,
-            lastName: parsed.data.guardianLastName,
-            relationship: parsed.data.guardianRelationship,
-            phone: guardianPhone,
+            firstName: parsed.data.guardianFirstName ?? "Bilinmiyor",
+            lastName: parsed.data.guardianLastName ?? "Bilinmiyor",
+            relationship: parsed.data.guardianRelationship ?? "Belirsiz",
+            phone: guardianPhone ?? "0000",
           },
         });
       }
