@@ -53,7 +53,11 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
         },
         enrollments: {
           where: { status: "ACTIVE" },
-          select: { agreedFeeAmount: true },
+          select: {
+            agreedFeeAmount: true,
+            enrollmentDate: true,
+            course: { select: { name: true } },
+          },
         },
       },
       orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
@@ -100,6 +104,8 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
       (sum, entry) => sum.plus(entry.amount),
       new Prisma.Decimal(0),
     );
+    const paymentEntriesForMonth = [...(charge?.payments ?? []), ...student.accountEntries]
+      .sort((left, right) => right.occurredOn.getTime() - left.occurredOn.getTime());
     const paid = chargePaid.plus(directPaid);
     const remaining = expectedConfigured
       ? Prisma.Decimal.max(new Prisma.Decimal(0), expected.minus(paid))
@@ -107,7 +113,7 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
     const credit = expectedConfigured
       ? Prisma.Decimal.max(new Prisma.Decimal(0), paid.minus(expected))
       : new Prisma.Decimal(0);
-    return { ...student, charge, expected, expectedConfigured, paid, directPaid, remaining, credit, totalPaid: totalPaidByStudent.get(student.id) ?? new Prisma.Decimal(0) };
+    return { ...student, charge, expected, expectedConfigured, paid, directPaid, paymentEntriesForMonth, remaining, credit, totalPaid: totalPaidByStudent.get(student.id) ?? new Prisma.Decimal(0) };
   });
   const filteredRows = rows.filter((row) => {
     const fullName = `${row.firstName} ${row.lastName}`.toLocaleLowerCase("tr-TR");
@@ -149,10 +155,13 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
       </div>
     </CardContent></Card>
     <Card><CardHeader><CardTitle>Aylık öğrenci özeti</CardTitle></CardHeader><CardContent>
-      <Table><TableHeader><TableRow>{[["student", "Öğrenci"], ["expected", "Aylık beklenen"], ["paid", "Aylık ödenen"], ["remaining", "Kalan borç"]].map(([value, label]) => <TableHead key={value} className={value === "student" ? undefined : "text-right"}><TableSortLink href={{ pathname: "/tahsilatlar", query: { ...query, sort: value, direction: sort === value && direction === "asc" ? "desc" : "asc" } }} active={sort === value} direction={direction}>{label}</TableSortLink></TableHead>)}<TableHead className="text-right">Toplam ödeme</TableHead><TableHead className="text-right">İşlem</TableHead></TableRow></TableHeader>
+      <Table><TableHeader><TableRow>{[["student", "Öğrenci"], ["expected", "Aylık beklenen"], ["paid", "Aylık ödenen"], ["remaining", "Kalan borç"]].map(([value, label]) => <TableHead key={value} className={value === "student" ? undefined : "text-right"}><TableSortLink href={{ pathname: "/tahsilatlar", query: { ...query, sort: value, direction: sort === value && direction === "asc" ? "desc" : "asc" } }} active={sort === value} direction={direction}>{label}</TableSortLink></TableHead>)}<TableHead>Kesin kayıt tarihleri</TableHead><TableHead>Ödeme tarihleri</TableHead><TableHead className="text-right">Toplam ödeme</TableHead><TableHead className="text-right">İşlem</TableHead></TableRow></TableHeader>
         <TableBody>{filteredRows.map((row) => <TableRow key={row.id}>
           <TableCell><Link className="font-medium hover:underline" href={`/ogrenciler/${row.id}`}>{row.firstName} {row.lastName}</Link>{!row.expectedConfigured ? <p className="text-xs text-amber-700">Aktif ders ücreti tanımlı değil; borç hesaplanmadı.</p> : null}{row.directPaid.greaterThan(0) ? <p className="text-xs text-muted-foreground">Tahakkuksuz ödeme: {formatMoney(row.directPaid)}</p> : null}{row.credit.greaterThan(0) ? <p className="text-xs text-emerald-700">Devreden fazla ödeme: {formatMoney(row.credit)}</p> : null}</TableCell>
-          <TableCell className="text-right">{row.expectedConfigured ? formatMoney(row.expected) : "—"}</TableCell><TableCell className="text-right text-emerald-700">{formatMoney(row.paid)}</TableCell><TableCell className={row.remaining.greaterThan(0) ? "text-right font-medium text-destructive" : "text-right font-medium"}>{row.expectedConfigured ? formatMoney(row.remaining) : "—"}</TableCell><TableCell className="text-right font-medium">{formatMoney(row.totalPaid)}</TableCell>
+          <TableCell className="text-right">{row.expectedConfigured ? formatMoney(row.expected) : "—"}</TableCell><TableCell className="text-right text-emerald-700">{formatMoney(row.paid)}</TableCell><TableCell className={row.remaining.greaterThan(0) ? "text-right font-medium text-destructive" : "text-right font-medium"}>{row.expectedConfigured ? formatMoney(row.remaining) : "—"}</TableCell>
+          <TableCell className="text-xs whitespace-nowrap">{row.enrollments.length ? row.enrollments.map((enrollment) => <p key={enrollment.course.name}>{enrollment.course.name}: {formatDate(enrollment.enrollmentDate)}</p>) : "—"}</TableCell>
+          <TableCell className="text-xs whitespace-nowrap">{row.paymentEntriesForMonth.length ? row.paymentEntriesForMonth.map((entry) => <p key={entry.id}>{formatDate(entry.occurredOn)} · {formatMoney(entry.amount)}</p>) : "—"}</TableCell>
+          <TableCell className="text-right font-medium">{formatMoney(row.totalPaid)}</TableCell>
           <TableCell className="text-right">{canMutateOperations(user.role) ? <MonthlyPaymentDialog studentId={row.id} studentName={`${row.firstName} ${row.lastName}`} month={month} today={paymentDate} /> : null}</TableCell>
         </TableRow>)}</TableBody></Table>
       {!filteredRows.length ? <p className="py-8 text-center text-sm text-muted-foreground">Seçilen ay ve filtrelere uygun aktif öğrenci bulunamadı.</p> : null}
