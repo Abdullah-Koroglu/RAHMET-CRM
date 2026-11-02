@@ -44,7 +44,7 @@ export function StudentPaymentDialog({
           <DialogTitle>Ödeme gir</DialogTitle>
           <DialogDescription>
             {studentName} için ödeme ilgili aya kaydedilir. O ayda tahakkuk
-            varsa otomatik olarak bağlanır; devreden ders borcu varsa ödeme önce ona sayılır.
+            varsa otomatik olarak bağlanır. Devreden ders borcuna mahsup etmek için aşağıdaki seçeneği işaretleyin.
           </DialogDescription>
         </DialogHeader>
         <ActionForm action={recordStudentPayment} className="space-y-3">
@@ -89,6 +89,10 @@ export function StudentPaymentDialog({
               <Label htmlFor={`student-payment-note-${studentId}`}>Açıklama</Label>
               <Textarea id={`student-payment-note-${studentId}`} name="note" maxLength={500} rows={3} placeholder="Ödeme açıklaması" />
             </div>
+            <label className="flex items-start gap-2 rounded-lg border p-3 text-sm">
+              <input name="applyToCarryover" type="checkbox" className="mt-0.5" />
+              <span>Bu ödeme devreden ders borcuna mahsup edilsin. İşaretlenmezse yalnızca seçili ayın normal ders ücretine sayılır.</span>
+            </label>
             <Button type="submit" className="w-full">
               Ödemeyi kaydet
             </Button>

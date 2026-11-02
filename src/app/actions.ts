@@ -1035,6 +1035,7 @@ const paymentSchema = z.object({
   month: billingMonth,
   paidOn: z.string().date(),
   note: optionalText(500),
+  applyToCarryover: z.enum(["on", ""]).transform((value) => value === "on"),
 });
 const monthlyChargeSchema = z.object({
   studentId: id,
@@ -1515,6 +1516,7 @@ export async function recordStudentPayment(
     month: formValue(formData, "month"),
     paidOn: formValue(formData, "paidOn"),
     note: formValue(formData, "note"),
+    applyToCarryover: formValue(formData, "applyToCarryover"),
   });
   if (!parsed.success) return invalid();
   try {
@@ -1608,7 +1610,8 @@ export async function recordStudentPayment(
           createdByUserId: user.id,
         },
       });
-      await allocatePaymentToCarryoverLines(tx, entry);
+      if (parsed.data.applyToCarryover)
+        await allocatePaymentToCarryoverLines(tx, entry);
       await writeAudit(
         tx,
         user.id,
@@ -1759,10 +1762,13 @@ export async function updateStudentPayment(
           occurredOn: new Date(parsed.data.paidOn),
         },
       });
+      const hadCarryoverAllocation = await tx.studentCarryoverPaymentAllocation.count({
+        where: { paymentEntryId: payment.id },
+      });
       await tx.studentCarryoverPaymentAllocation.deleteMany({
         where: { paymentEntryId: payment.id },
       });
-      await allocatePaymentToCarryoverLines(tx, updated);
+      if (hadCarryoverAllocation) await allocatePaymentToCarryoverLines(tx, updated);
       await writeAudit(
         tx,
         user.id,

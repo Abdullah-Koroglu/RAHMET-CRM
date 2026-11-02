@@ -83,7 +83,7 @@ export function MonthlyPaymentDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Aylık ödeme ekle</DialogTitle>
-          <DialogDescription>{studentName} · {month}. Tahakkuk varsa ödeme otomatik olarak bağlanır; devreden ders borcu varsa ödeme önce ona sayılır.</DialogDescription>
+          <DialogDescription>{studentName} · {month}. Tahakkuk varsa ödeme otomatik olarak bağlanır. Devreden ders borcuna mahsup etmek için aşağıdaki seçeneği işaretleyin.</DialogDescription>
         </DialogHeader>
         <ActionForm action={recordStudentPayment} className="space-y-3">
           <input type="hidden" name="studentId" value={studentId} />
@@ -101,6 +101,10 @@ export function MonthlyPaymentDialog({
             <Label htmlFor={`monthly-payment-note-${studentId}`}>Açıklama</Label>
             <Textarea id={`monthly-payment-note-${studentId}`} name="note" maxLength={500} rows={3} placeholder="Ödeme açıklaması" />
           </div>
+          <label className="flex items-start gap-2 rounded-lg border p-3 text-sm">
+            <input name="applyToCarryover" type="checkbox" className="mt-0.5" />
+            <span>Bu ödeme devreden ders borcuna mahsup edilsin. İşaretlenmezse yalnızca bu ayın normal ders ücretine sayılır.</span>
+          </label>
           <Button type="submit" className="w-full">Ödemeyi kaydet</Button>
         </ActionForm>
       </DialogContent>
