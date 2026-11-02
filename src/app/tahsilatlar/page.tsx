@@ -89,11 +89,15 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
       (sum, enrollment) => sum.plus(enrollment.agreedFeeAmount),
       new Prisma.Decimal(0),
     );
+    const carryoverExpected = (charge?.carryoverLines ?? []).reduce(
+      (sum, line) => sum.plus(line.amount),
+      new Prisma.Decimal(0),
+    );
     // Automatically generated charges are a cache of active enrollments, not
     // an independent debt. Use the live enrollment total so a later
     // cancellation cannot leave a false debt on the monthly summary.
     const expected = charge?.note === "Aktif kesin kayıt ücretlerinden otomatik oluşturuldu."
-      ? derivedExpected
+      ? derivedExpected.plus(carryoverExpected)
       : Prisma.Decimal.max(charge?.expectedAmount ?? new Prisma.Decimal(0), derivedExpected);
     const expectedConfigured = expected.greaterThan(0);
     const chargePaid = charge
