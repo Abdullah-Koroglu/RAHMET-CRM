@@ -147,7 +147,7 @@ export function AttendanceCarryoverDialog({ month }: { month: string }) {
         <DialogHeader>
           <DialogTitle>Geç kayıt devrini oluştur</DialogTitle>
           <DialogDescription>
-            {sourceMonth} ayında katıldığı halde ödeme kaydı olmayan öğrencilerin dersleri, {month} tahakkukuna eklenir. Ders başı ücret aylık ücretin dörtte biridir; mevcut ödemesi olan öğrenciler otomatik olarak atlanır.
+            {sourceMonth} ayında ödeme kaydı olmayan aktif kayıtların ücretleri, kayıt başlangıç tarihine göre {month} tahakkukuna eklenir. Her hafta bir ders sayılır ve ders başı ücret aylık ücretin dörtte biridir; mevcut ödemesi olan öğrenciler otomatik olarak atlanır.
           </DialogDescription>
         </DialogHeader>
         <ActionForm action={createAttendanceCarryoverCharges} className="space-y-3">

@@ -1391,10 +1391,14 @@ export async function createAttendanceCarryoverCharges(
       const billingMonth = billingMonthDate(parsed.data.month);
       const sourceMonth = previousBillingMonthDate(parsed.data.month);
       const nextSourceMonth = billingMonth;
-      const [attendances, previousPayments] = await Promise.all([
-        tx.lessonAttendance.findMany({
-          where: { status: "PRESENT", lessonSession: { sessionDate: { gte: sourceMonth, lt: nextSourceMonth } } },
-          include: { enrollment: { include: { student: true } } },
+      const [eligibleEnrollments, previousPayments] = await Promise.all([
+        tx.enrollment.findMany({
+          where: {
+            status: "ACTIVE",
+            enrollmentDate: { lt: nextSourceMonth },
+            student: { isActive: true },
+          },
+          include: { student: true },
         }),
         tx.studentAccountEntry.groupBy({
           by: ["studentId"],
@@ -1410,13 +1414,25 @@ export async function createAttendanceCarryoverCharges(
       ]);
       const paidByStudent = new Map(previousPayments.map((row) => [row.studentId, row._sum.amount ?? new Prisma.Decimal(0)]));
       const grouped = new Map<string, { studentId: string; enrollmentId: string; count: number; fee: Prisma.Decimal }>();
-      for (const attendance of attendances) {
-        const enrollment = attendance.enrollment;
-        if (!enrollment.student.isActive || (paidByStudent.get(enrollment.studentId)?.greaterThan(0) ?? false)) continue;
-        const current = grouped.get(enrollment.id);
-        grouped.set(enrollment.id, current
-          ? { ...current, count: current.count + 1 }
-          : { studentId: enrollment.studentId, enrollmentId: enrollment.id, count: 1, fee: enrollment.agreedFeeAmount });
+      for (const enrollment of eligibleEnrollments) {
+        if (paidByStudent.get(enrollment.studentId)?.greaterThan(0) ?? false) continue;
+        const effectiveStart = enrollment.enrollmentDate > sourceMonth
+          ? enrollment.enrollmentDate
+          : sourceMonth;
+        const daysUntilMonthEnd = Math.max(
+          1,
+          Math.ceil((nextSourceMonth.getTime() - effectiveStart.getTime()) / (1000 * 60 * 60 * 24)),
+        );
+        const count = Math.min(
+          enrollment.monthlySessionCount,
+          Math.max(1, Math.ceil(daysUntilMonthEnd / 7)),
+        );
+        grouped.set(enrollment.id, {
+          studentId: enrollment.studentId,
+          enrollmentId: enrollment.id,
+          count,
+          fee: enrollment.agreedFeeAmount,
+        });
       }
       let lines = 0;
       const students = new Set<string>();
@@ -1445,8 +1461,8 @@ export async function createAttendanceCarryoverCharges(
           students.add(item.studentId);
         }
       }
-      await writeAudit(tx, user.id, "STUDENT_ATTENDANCE_CARRYOVER_CREATED", "StudentMonthlyCharge", null, {
-        month: parsed.data.month, sourceMonth: sourceMonth.toISOString().slice(0, 7), pricing: "monthly-fee-divided-by-4", lines, students: students.size,
+      await writeAudit(tx, user.id, "STUDENT_REGISTRATION_DATE_CARRYOVER_CREATED", "StudentMonthlyCharge", null, {
+        month: parsed.data.month, sourceMonth: sourceMonth.toISOString().slice(0, 7), pricing: "monthly-fee-divided-by-4-registration-date", lines, students: students.size,
       });
       return { lines, students: students.size };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
