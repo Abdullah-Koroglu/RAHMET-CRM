@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import {
   createMonthlyChargesForActiveStudents,
+  createAttendanceCarryoverCharges,
   recordStudentPayment,
   upsertStudentMonthlyCharge,
 } from "@/app/actions";
@@ -129,6 +130,29 @@ export function BulkMonthlyChargeDialog({ month }: { month: string }) {
             <Textarea id="bulk-charge-note" name="note" maxLength={500} rows={3} />
           </div>
           <Button type="submit" className="w-full">Eksik tahakkukları oluştur</Button>
+        </ActionForm>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function AttendanceCarryoverDialog({ month }: { month: string }) {
+  const previousMonth = new Date(`${month}-01T00:00:00.000Z`);
+  previousMonth.setUTCMonth(previousMonth.getUTCMonth() - 1);
+  const sourceMonth = previousMonth.toISOString().slice(0, 7);
+  return (
+    <Dialog>
+      <DialogTrigger render={<Button variant="outline" />}>Devreden dersleri hesapla</DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Geç kayıt devrini oluştur</DialogTitle>
+          <DialogDescription>
+            {sourceMonth} ayında katıldığı halde ödeme kaydı olmayan öğrencilerin dersleri, {month} tahakkukuna eklenir. Ders başı ücret aylık ücretin dörtte biridir; mevcut ödemesi olan öğrenciler otomatik olarak atlanır.
+          </DialogDescription>
+        </DialogHeader>
+        <ActionForm action={createAttendanceCarryoverCharges} className="space-y-3">
+          <input type="hidden" name="month" value={month} />
+          <Button type="submit" className="w-full">Hesapla ve tahakkuka ekle</Button>
         </ActionForm>
       </DialogContent>
     </Dialog>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { MonthlyPaymentDialog } from "@/components/monthly-charge-dialog";
+import { AttendanceCarryoverDialog, MonthlyPaymentDialog } from "@/components/monthly-charge-dialog";
 import { PaymentActionsDialog } from "@/components/payment-actions-dialog";
 import { PageHeader } from "@/components/page-header";
 import { TableSortLink } from "@/components/table-sort-link";
@@ -42,7 +42,7 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
       include: {
         monthlyCharges: {
           where: { billingMonth },
-          include: { payments: { where: { entryType: "PAYMENT" } } },
+          include: { payments: { where: { entryType: "PAYMENT" } }, carryoverLines: { include: { enrollment: { include: { course: { select: { name: true } } } } } } },
         },
         accountEntries: {
           where: {
@@ -137,7 +137,7 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
   const query = { q, balance: balanceFilter.success ? balanceFilter.data : "ALL", month };
 
   return <div className="space-y-6">
-    <PageHeader title="Tahsilatlar" description="Aylık beklenen tutarlar aktif kesin kayıtların kayıt ücretlerinden otomatik hesaplanır; ödeme girildiğinde tahakkuk da otomatik oluşturulur." />
+    <PageHeader title="Tahsilatlar" description="Aylık beklenen tutarlar aktif kesin kayıtların kayıt ücretlerinden otomatik hesaplanır; ödeme girildiğinde tahakkuk da otomatik oluşturulur." actions={user.role === "ADMIN" ? <AttendanceCarryoverDialog month={month} /> : undefined} />
     <Card><CardContent className="pt-6">
       <form className="mb-5 grid gap-3 sm:grid-cols-[auto_160px_1fr_180px_auto] sm:items-end">
         <Button variant="outline" render={<Link href={{ pathname: "/tahsilatlar", query: { ...query, month: shiftMonth(month, -1) } }} />}>Önceki ay</Button>
@@ -156,7 +156,7 @@ export default async function CollectionsPage({ searchParams }: { searchParams: 
     <Card><CardHeader><CardTitle>Aylık öğrenci özeti</CardTitle></CardHeader><CardContent>
       <Table><TableHeader><TableRow>{[["student", "Öğrenci ve tarihler"], ["expected", "Aylık beklenen"], ["paid", "Aylık ödenen"], ["remaining", "Kalan borç"]].map(([value, label]) => <TableHead key={value} className={value === "student" ? undefined : "text-right"}><TableSortLink href={{ pathname: "/tahsilatlar", query: { ...query, sort: value, direction: sort === value && direction === "asc" ? "desc" : "asc" } }} active={sort === value} direction={direction}>{label}</TableSortLink></TableHead>)}<TableHead className="text-right">Toplam ödeme</TableHead><TableHead className="text-right">İşlem</TableHead></TableRow></TableHeader>
         <TableBody>{filteredRows.map((row) => <TableRow key={row.id}>
-          <TableCell><Link className="font-medium hover:underline" href={`/ogrenciler/${row.id}`}>{row.firstName} {row.lastName}</Link><div className="mt-1 space-y-0.5 text-xs text-muted-foreground">{row.enrollments.map((enrollment) => <p key={enrollment.course.name}>Kayıt · {enrollment.course.name}: {formatDate(enrollment.enrollmentDate)}</p>)}{row.paymentEntriesForMonth.length ? row.paymentEntriesForMonth.map((entry) => <p key={entry.id}>Ödeme · {formatDate(entry.occurredOn)}: {formatMoney(entry.amount)}</p>) : <p>Ödeme · Bu ay kayıt yok</p>}</div>{!row.expectedConfigured ? <p className="text-xs text-amber-700">Aktif ders ücreti tanımlı değil; borç hesaplanmadı.</p> : null}{row.directPaid.greaterThan(0) ? <p className="text-xs text-muted-foreground">Tahakkuksuz ödeme: {formatMoney(row.directPaid)}</p> : null}{row.credit.greaterThan(0) ? <p className="text-xs text-emerald-700">Devreden fazla ödeme: {formatMoney(row.credit)}</p> : null}</TableCell>
+          <TableCell><Link className="font-medium hover:underline" href={`/ogrenciler/${row.id}`}>{row.firstName} {row.lastName}</Link><div className="mt-1 space-y-0.5 text-xs text-muted-foreground">{row.enrollments.map((enrollment) => <p key={enrollment.course.name}>Kayıt · {enrollment.course.name}: {formatDate(enrollment.enrollmentDate)}</p>)}{row.charge?.carryoverLines.map((line) => <p key={line.id} className="text-amber-700">Devreden · {line.enrollment.course.name}: {line.sourceMonth.toISOString().slice(0, 7)} · {line.lessonCount} ders × {formatMoney(line.unitAmount)} = {formatMoney(line.amount)}</p>)}{row.paymentEntriesForMonth.length ? row.paymentEntriesForMonth.map((entry) => <p key={entry.id}>Ödeme · {formatDate(entry.occurredOn)}: {formatMoney(entry.amount)}</p>) : <p>Ödeme · Bu ay kayıt yok</p>}</div>{!row.expectedConfigured ? <p className="text-xs text-amber-700">Aktif ders ücreti tanımlı değil; borç hesaplanmadı.</p> : null}{row.directPaid.greaterThan(0) ? <p className="text-xs text-muted-foreground">Tahakkuksuz ödeme: {formatMoney(row.directPaid)}</p> : null}{row.credit.greaterThan(0) ? <p className="text-xs text-emerald-700">Devreden fazla ödeme: {formatMoney(row.credit)}</p> : null}</TableCell>
           <TableCell className="text-right">{row.expectedConfigured ? formatMoney(row.expected) : "—"}</TableCell><TableCell className="text-right text-emerald-700">{formatMoney(row.paid)}</TableCell><TableCell className={row.remaining.greaterThan(0) ? "text-right font-medium text-destructive" : "text-right font-medium"}>{row.expectedConfigured ? formatMoney(row.remaining) : "—"}</TableCell>
           <TableCell className="text-right font-medium">{formatMoney(row.totalPaid)}</TableCell>
           <TableCell className="text-right">{canMutateOperations(user.role) ? <MonthlyPaymentDialog studentId={row.id} studentName={`${row.firstName} ${row.lastName}`} month={month} today={paymentDate} /> : null}</TableCell>

@@ -1047,6 +1047,9 @@ const bulkMonthlyChargeSchema = z.object({
   expectedAmount: money,
   note: optionalText(500),
 });
+const carryoverChargeSchema = z.object({
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+});
 
 export async function saveBulkAttendance(
   _state: ActionState,
@@ -1257,6 +1260,12 @@ function billingMonthDate(month: string) {
   return new Date(`${month}-01T00:00:00.000Z`);
 }
 
+function previousBillingMonthDate(month: string) {
+  const date = billingMonthDate(month);
+  date.setUTCMonth(date.getUTCMonth() - 1);
+  return date;
+}
+
 export async function upsertStudentMonthlyCharge(
   _state: ActionState,
   formData: FormData,
@@ -1367,6 +1376,85 @@ export async function createMonthlyChargesForActiveStudents(
     return actionSuccess(`${count} öğrenci için aylık tahakkuk oluşturuldu.`);
   } catch (error) {
     return failed("createMonthlyChargesForActiveStudents", error, "Toplu aylık tahakkuk oluşturulamadı.");
+  }
+}
+
+export async function createAttendanceCarryoverCharges(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = carryoverChargeSchema.safeParse({ month: formValue(formData, "month") });
+  if (!parsed.success) return invalid();
+  try {
+    const { user } = await secure(["ADMIN"], async () => null);
+    const result = await db.$transaction(async (tx) => {
+      const billingMonth = billingMonthDate(parsed.data.month);
+      const sourceMonth = previousBillingMonthDate(parsed.data.month);
+      const nextSourceMonth = billingMonth;
+      const [attendances, previousPayments] = await Promise.all([
+        tx.lessonAttendance.findMany({
+          where: { status: "PRESENT", lessonSession: { sessionDate: { gte: sourceMonth, lt: nextSourceMonth } } },
+          include: { enrollment: { include: { student: true } } },
+        }),
+        tx.studentAccountEntry.groupBy({
+          by: ["studentId"],
+          where: {
+            entryType: "PAYMENT",
+            OR: [
+              { monthlyCharge: { billingMonth: sourceMonth } },
+              { monthlyChargeId: null, occurredOn: { gte: sourceMonth, lt: nextSourceMonth } },
+            ],
+          },
+          _sum: { amount: true },
+        }),
+      ]);
+      const paidByStudent = new Map(previousPayments.map((row) => [row.studentId, row._sum.amount ?? new Prisma.Decimal(0)]));
+      const grouped = new Map<string, { studentId: string; enrollmentId: string; count: number; fee: Prisma.Decimal }>();
+      for (const attendance of attendances) {
+        const enrollment = attendance.enrollment;
+        if (!enrollment.student.isActive || (paidByStudent.get(enrollment.studentId)?.greaterThan(0) ?? false)) continue;
+        const current = grouped.get(enrollment.id);
+        grouped.set(enrollment.id, current
+          ? { ...current, count: current.count + 1 }
+          : { studentId: enrollment.studentId, enrollmentId: enrollment.id, count: 1, fee: enrollment.agreedFeeAmount });
+      }
+      let lines = 0;
+      const students = new Set<string>();
+      for (const item of grouped.values()) {
+        const activeEnrollments = await tx.enrollment.findMany({
+          where: { studentId: item.studentId, status: "ACTIVE" },
+          select: { agreedFeeAmount: true },
+        });
+        if (!activeEnrollments.length) continue;
+        const currentMonthBase = activeEnrollments.reduce((sum, enrollment) => sum.plus(enrollment.agreedFeeAmount), new Prisma.Decimal(0));
+        let charge = await tx.studentMonthlyCharge.findUnique({ where: { studentId_billingMonth: { studentId: item.studentId, billingMonth } } });
+        if (!charge) {
+          charge = await tx.studentMonthlyCharge.create({
+            data: { studentId: item.studentId, billingMonth, expectedAmount: currentMonthBase, note: "Aktif kesin kayıt ücretlerinden otomatik oluşturuldu.", createdByUserId: user.id },
+          });
+        }
+        const unitAmount = item.fee.dividedBy(4);
+        const amount = unitAmount.mul(item.count);
+        const line = await tx.studentMonthlyCarryoverLine.createMany({
+          data: [{ monthlyChargeId: charge.id, enrollmentId: item.enrollmentId, sourceMonth, lessonCount: item.count, unitAmount, amount, createdByUserId: user.id }],
+          skipDuplicates: true,
+        });
+        if (line.count) {
+          await tx.studentMonthlyCharge.update({ where: { id: charge.id }, data: { expectedAmount: { increment: amount } } });
+          lines += 1;
+          students.add(item.studentId);
+        }
+      }
+      await writeAudit(tx, user.id, "STUDENT_ATTENDANCE_CARRYOVER_CREATED", "StudentMonthlyCharge", null, {
+        month: parsed.data.month, sourceMonth: sourceMonth.toISOString().slice(0, 7), pricing: "monthly-fee-divided-by-4", lines, students: students.size,
+      });
+      return { lines, students: students.size };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    revalidatePath("/tahsilatlar");
+    revalidatePath("/ogrenciler");
+    return actionSuccess(`${result.students} öğrenci için ${result.lines} devreden ders satırı oluşturuldu.`);
+  } catch (error) {
+    return failed("createAttendanceCarryoverCharges", error, "Devreden ders tahakkukları oluşturulamadı.");
   }
 }
 
