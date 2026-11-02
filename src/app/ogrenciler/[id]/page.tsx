@@ -90,6 +90,11 @@ export default async function StudentDetailPage({
       },
       monthlyCharges: {
         orderBy: { billingMonth: "desc" },
+        include: {
+          carryoverLines: {
+            include: { enrollment: { include: { course: true } } },
+          },
+        },
       },
     },
   });
@@ -110,6 +115,15 @@ export default async function StudentDetailPage({
   );
   const balance = student.accountEntries.reduce(
     (sum, entry) => sum.plus(entry.amount),
+    new Prisma.Decimal(0),
+  );
+  const carryoverLines = student.monthlyCharges.flatMap((charge) =>
+    charge.carryoverLines
+      .filter((line) => line.amount.greaterThan(0))
+      .map((line) => ({ ...line, billingMonth: charge.billingMonth })),
+  );
+  const carryoverTotal = carryoverLines.reduce(
+    (sum, line) => sum.plus(line.amount),
     new Prisma.Decimal(0),
   );
   const displayedEnrollments = student.enrollments
@@ -382,6 +396,25 @@ export default async function StudentDetailPage({
                 ? "Kullanılabilir ödeme bakiyesi"
                 : "Ödenmesi gereken borç"}
             </p>
+            <div className="space-y-2 border-t pt-4">
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-sm font-medium">Devreden ders borcu</p>
+                <p className="font-semibold text-amber-700">
+                  {formatMoney(carryoverTotal)}
+                </p>
+              </div>
+              {carryoverLines.length ? (
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  {carryoverLines.map((line) => (
+                    <p key={line.id}>
+                      {line.billingMonth.toISOString().slice(0, 7)} · {line.enrollment.course.name} · {line.lessonCount} ders × {formatMoney(line.unitAmount)} = {formatMoney(line.amount)}
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Devreden ders borcu yok.</p>
+              )}
+            </div>
             {canMutateOperations(user.role) ? (
               <div className="border-t pt-4">
                 <StudentPaymentDialog
