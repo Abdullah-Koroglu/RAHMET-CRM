@@ -92,7 +92,12 @@ export default async function StudentDetailPage({
         orderBy: { billingMonth: "desc" },
         include: {
           carryoverLines: {
-            include: { enrollment: { include: { course: true } } },
+            include: {
+              enrollment: { include: { course: true } },
+              paymentAllocations: {
+                include: { paymentEntry: { select: { occurredOn: true } } },
+              },
+            },
           },
         },
       },
@@ -120,7 +125,14 @@ export default async function StudentDetailPage({
   const carryoverLines = student.monthlyCharges.flatMap((charge) =>
     charge.carryoverLines
       .filter((line) => line.amount.greaterThan(0))
-      .map((line) => ({ ...line, billingMonth: charge.billingMonth })),
+      .map((line) => ({
+        ...line,
+        billingMonth: charge.billingMonth,
+        paidAmount: line.paymentAllocations.reduce(
+          (sum, allocation) => sum.plus(allocation.amount),
+          new Prisma.Decimal(0),
+        ),
+      })),
   );
   const carryoverTotal = carryoverLines.reduce(
     (sum, line) => sum.plus(line.amount),
@@ -408,6 +420,11 @@ export default async function StudentDetailPage({
                   {carryoverLines.map((line) => (
                     <p key={line.id}>
                       {line.billingMonth.toISOString().slice(0, 7)} · {line.enrollment.course.name} · {line.lessonCount} ders × {formatMoney(line.unitAmount)} = {formatMoney(line.amount)}
+                      {line.paidAmount.greaterThanOrEqualTo(line.amount)
+                        ? " · Ödendi"
+                        : line.paidAmount.greaterThan(0)
+                          ? ` · Ödenen ${formatMoney(line.paidAmount)} · Kalan ${formatMoney(line.amount.minus(line.paidAmount))}`
+                          : ` · Kalan ${formatMoney(line.amount)}`}
                     </p>
                   ))}
                 </div>

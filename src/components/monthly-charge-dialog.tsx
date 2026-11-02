@@ -83,7 +83,7 @@ export function MonthlyPaymentDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Aylık ödeme ekle</DialogTitle>
-          <DialogDescription>{studentName} · {month}. Tahakkuk varsa ödeme otomatik olarak bağlanır.</DialogDescription>
+          <DialogDescription>{studentName} · {month}. Tahakkuk varsa ödeme otomatik olarak bağlanır; devreden ders borcu varsa ödeme önce ona sayılır.</DialogDescription>
         </DialogHeader>
         <ActionForm action={recordStudentPayment} className="space-y-3">
           <input type="hidden" name="studentId" value={studentId} />

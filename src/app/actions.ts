@@ -1474,6 +1474,36 @@ export async function createAttendanceCarryoverCharges(
   }
 }
 
+async function allocatePaymentToCarryoverLines(
+  tx: Prisma.TransactionClient,
+  payment: { id: string; monthlyChargeId: string | null; amount: Prisma.Decimal },
+) {
+  if (!payment.monthlyChargeId || !payment.amount.greaterThan(0)) return;
+  const lines = await tx.studentMonthlyCarryoverLine.findMany({
+    where: { monthlyChargeId: payment.monthlyChargeId, amount: { gt: 0 } },
+    include: { paymentAllocations: { select: { amount: true } } },
+    orderBy: [{ sourceMonth: "asc" }, { createdAt: "asc" }],
+  });
+  let available = new Prisma.Decimal(payment.amount);
+  for (const line of lines) {
+    if (available.lessThanOrEqualTo(0)) break;
+    const alreadyAllocated = line.paymentAllocations.reduce(
+      (sum, allocation) => sum.plus(allocation.amount),
+      new Prisma.Decimal(0),
+    );
+    const outstanding = Prisma.Decimal.max(
+      new Prisma.Decimal(0),
+      line.amount.minus(alreadyAllocated),
+    );
+    if (outstanding.lessThanOrEqualTo(0)) continue;
+    const amount = Prisma.Decimal.min(available, outstanding);
+    await tx.studentCarryoverPaymentAllocation.create({
+      data: { carryoverLineId: line.id, paymentEntryId: payment.id, amount },
+    });
+    available = available.minus(amount);
+  }
+}
+
 export async function recordStudentPayment(
   _state: ActionState,
   formData: FormData,
@@ -1536,27 +1566,35 @@ export async function recordStudentPayment(
         );
       } else if (
         charge &&
-        charge.note === "Aktif kesin kayıt ücretlerinden otomatik oluşturuldu." &&
-        !derivedExpectedAmount.equals(charge.expectedAmount)
+        charge.note === "Aktif kesin kayıt ücretlerinden otomatik oluşturuldu."
       ) {
-        const previousExpectedAmount = charge.expectedAmount;
-        charge = await tx.studentMonthlyCharge.update({
-          where: { id: charge.id },
-          data: { expectedAmount: derivedExpectedAmount },
+        const carryoverTotal = await tx.studentMonthlyCarryoverLine.aggregate({
+          where: { monthlyChargeId: charge.id },
+          _sum: { amount: true },
         });
-        await writeAudit(
-          tx,
-          user.id,
-          "STUDENT_MONTHLY_CHARGE_AUTO_UPDATED",
-          "StudentMonthlyCharge",
-          charge.id,
-          {
-            studentId: parsed.data.studentId,
-            month: parsed.data.month,
-            previousExpectedAmount: previousExpectedAmount.toString(),
-            expectedAmount: derivedExpectedAmount.toString(),
-          },
+        const expectedAmount = derivedExpectedAmount.plus(
+          carryoverTotal._sum.amount ?? new Prisma.Decimal(0),
         );
+        if (!expectedAmount.equals(charge.expectedAmount)) {
+          const previousExpectedAmount = charge.expectedAmount;
+          charge = await tx.studentMonthlyCharge.update({
+            where: { id: charge.id },
+            data: { expectedAmount },
+          });
+          await writeAudit(
+            tx,
+            user.id,
+            "STUDENT_MONTHLY_CHARGE_AUTO_UPDATED",
+            "StudentMonthlyCharge",
+            charge.id,
+            {
+              studentId: parsed.data.studentId,
+              month: parsed.data.month,
+              previousExpectedAmount: previousExpectedAmount.toString(),
+              expectedAmount: expectedAmount.toString(),
+            },
+          );
+        }
       }
       const entry = await tx.studentAccountEntry.create({
         data: {
@@ -1570,6 +1608,7 @@ export async function recordStudentPayment(
           createdByUserId: user.id,
         },
       });
+      await allocatePaymentToCarryoverLines(tx, entry);
       await writeAudit(
         tx,
         user.id,
@@ -1720,6 +1759,10 @@ export async function updateStudentPayment(
           occurredOn: new Date(parsed.data.paidOn),
         },
       });
+      await tx.studentCarryoverPaymentAllocation.deleteMany({
+        where: { paymentEntryId: payment.id },
+      });
+      await allocatePaymentToCarryoverLines(tx, updated);
       await writeAudit(
         tx,
         user.id,
@@ -1787,6 +1830,9 @@ export async function reverseStudentPayment(
           occurredOn: payment.occurredOn,
           createdByUserId: user.id,
         },
+      });
+      await tx.studentCarryoverPaymentAllocation.deleteMany({
+        where: { paymentEntryId: payment.id },
       });
       await writeAudit(
         tx,

@@ -44,7 +44,7 @@ export function StudentPaymentDialog({
           <DialogTitle>Ödeme gir</DialogTitle>
           <DialogDescription>
             {studentName} için ödeme ilgili aya kaydedilir. O ayda tahakkuk
-            varsa otomatik olarak bağlanır.
+            varsa otomatik olarak bağlanır; devreden ders borcu varsa ödeme önce ona sayılır.
           </DialogDescription>
         </DialogHeader>
         <ActionForm action={recordStudentPayment} className="space-y-3">

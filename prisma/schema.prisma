@@ -458,6 +458,7 @@ model StudentAccountEntry {
   enrollment       Enrollment?             @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
   lessonSession    LessonSession?          @relation(fields: [lessonSessionId], references: [id], onDelete: Restrict)
   monthlyCharge    StudentMonthlyCharge?   @relation(fields: [monthlyChargeId], references: [id], onDelete: Restrict)
+  carryoverAllocations StudentCarryoverPaymentAllocation[]
   createdBy        AppUser                 @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
   createdAt        DateTime                @default(now()) @map("created_at")
 
@@ -500,12 +501,28 @@ model StudentMonthlyCarryoverLine {
   createdByUserId String               @map("created_by_user_id") @db.Uuid
   monthlyCharge   StudentMonthlyCharge @relation(fields: [monthlyChargeId], references: [id], onDelete: Cascade)
   enrollment      Enrollment           @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  paymentAllocations StudentCarryoverPaymentAllocation[]
   createdBy       AppUser              @relation("CarryoverLineCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
   createdAt       DateTime             @default(now()) @map("created_at")
 
   @@unique([monthlyChargeId, enrollmentId, sourceMonth])
   @@index([sourceMonth])
   @@map("student_monthly_carryover_line")
+  @@schema("rahmet_crm")
+}
+
+model StudentCarryoverPaymentAllocation {
+  id              String                      @id @default(uuid()) @db.Uuid
+  carryoverLineId String                      @map("carryover_line_id") @db.Uuid
+  paymentEntryId  String                      @map("payment_entry_id") @db.Uuid
+  amount          Decimal                     @db.Decimal(12, 2)
+  carryoverLine   StudentMonthlyCarryoverLine @relation(fields: [carryoverLineId], references: [id], onDelete: Cascade)
+  paymentEntry    StudentAccountEntry         @relation(fields: [paymentEntryId], references: [id], onDelete: Cascade)
+  createdAt       DateTime                    @default(now()) @map("created_at")
+
+  @@unique([carryoverLineId, paymentEntryId])
+  @@index([paymentEntryId])
+  @@map("student_carryover_payment_allocation")
   @@schema("rahmet_crm")
 }
 
