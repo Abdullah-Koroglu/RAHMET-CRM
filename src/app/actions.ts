@@ -133,6 +133,7 @@ const academyEnrollmentUpdateSchema = academyEnrollmentSchema.extend({
   enrollmentId: id,
   guardianId: id.optional(),
 });
+const academyEnrollmentRemovalSchema = z.object({ enrollmentId: id });
 
 const academyPaymentSchema = z.object({
   enrollmentId: id,
@@ -333,6 +334,49 @@ export async function updateAcademyEnrollment(
     return actionSuccess("Akademi öğrenci kaydı güncellendi.");
   } catch (error) {
     return failed("updateAcademyEnrollment", error, "Akademi kaydı güncellenemedi.");
+  }
+}
+
+export async function deactivateAcademyEnrollment(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = academyEnrollmentRemovalSchema.safeParse({
+    enrollmentId: formValue(formData, "enrollmentId"),
+  });
+  if (!parsed.success) return invalid();
+  try {
+    const { user } = await secure(["ADMIN"], async () => null);
+    const enrollment = await db.$transaction(async (tx) => {
+      const existing = await tx.academyEnrollment.findUniqueOrThrow({
+        where: { id: parsed.data.enrollmentId },
+      });
+      if (!existing.isActive) throw new Error("ACADEMY_ENROLLMENT_INACTIVE");
+      const updated = await tx.academyEnrollment.update({
+        where: { id: existing.id },
+        data: { isActive: false },
+      });
+      await writeAudit(
+        tx,
+        user.id,
+        "ACADEMY_ENROLLMENT_DEACTIVATED",
+        "AcademyEnrollment",
+        updated.id,
+        { academy: updated.academy, studentId: updated.studentId },
+      );
+      return updated;
+    });
+    revalidatePath("/akademiler");
+    revalidatePath(`/akademiler/${academySlug(enrollment.academy)}`);
+    revalidatePath(`/ogrenciler/${enrollment.studentId}`);
+    revalidatePath("/ogrenciler");
+    return actionSuccess("Öğrenci akademi listesinden kaldırıldı. Öğrenci ve tahsilat geçmişi korundu.");
+  } catch (error) {
+    return failed(
+      "deactivateAcademyEnrollment",
+      error,
+      "Akademi kaydı kaldırılamadı.",
+    );
   }
 }
 

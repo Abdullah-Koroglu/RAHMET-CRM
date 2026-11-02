@@ -1,6 +1,6 @@
 "use client";
 
-import { createAcademyEnrollment, recordAcademyPayment, updateAcademyEnrollment } from "@/app/actions";
+import { createAcademyEnrollment, deactivateAcademyEnrollment, recordAcademyPayment, updateAcademyEnrollment } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -26,6 +26,10 @@ type AcademyEnrollmentEditDialogProps = {
 
 export function AcademyEnrollmentEditDialog({ academy, academyName, enrollmentId, student, guardian, feeAmount }: AcademyEnrollmentEditDialogProps) {
   return <Dialog><DialogTrigger render={<Button variant="outline" size="sm" />}>Düzenle</DialogTrigger><DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{academyName} kaydını düzenle</DialogTitle><DialogDescription>Öğrenci, varsa veli ve toplam akademi ücretini güncelleyin.</DialogDescription></DialogHeader><ActionForm action={updateAcademyEnrollment} className="grid gap-4 sm:grid-cols-2"><input type="hidden" name="enrollmentId" value={enrollmentId} /><input type="hidden" name="academy" value={academy} /><input type="hidden" name="guardianId" value={guardian?.id ?? ""} /><div className="sm:col-span-2"><p className="text-sm font-medium">Öğrenci bilgileri</p></div><Field label="Öğrenci adı" name="firstName" required defaultValue={student.firstName} /><Field label="Öğrenci soyadı" name="lastName" required defaultValue={student.lastName} /><Field label="Öğrenci telefonu" name="studentPhone" type="tel" placeholder="Opsiyonel" defaultValue={student.phone ?? ""} /><Field label="Sınıf seviyesi" name="classLevel" placeholder="Örn. 5. sınıf" defaultValue={student.classLevel ?? ""} /><div className="sm:col-span-2 mt-2"><p className="text-sm font-medium">Veli bilgileri (opsiyonel)</p></div><Field label="Veli adı" name="guardianFirstName" defaultValue={guardian?.firstName ?? ""} /><Field label="Veli soyadı" name="guardianLastName" defaultValue={guardian?.lastName ?? ""} /><Field label="Yakınlık derecesi" name="guardianRelationship" defaultValue={guardian?.relationship ?? ""} /><Field label="Veli telefonu" name="guardianPhone" type="tel" placeholder="Bilgi yoksa 0000" defaultValue={guardian?.phone ?? ""} /><div className="sm:col-span-2 mt-2"><Field label="Toplam akademi ücreti (TL)" name="feeAmount" type="number" min="0" step="0.01" required defaultValue={feeAmount} /></div><div className="sm:col-span-2"><Button type="submit" className="w-full">Değişiklikleri kaydet</Button></div></ActionForm></DialogContent></Dialog>;
+}
+
+export function AcademyEnrollmentRemoveDialog({ enrollmentId, studentName }: { enrollmentId: string; studentName: string }) {
+  return <Dialog><DialogTrigger render={<Button variant="destructive" size="sm" />}>Öğrenciyi sil</DialogTrigger><DialogContent><DialogHeader><DialogTitle>Akademi kaydını kaldır</DialogTitle><DialogDescription>{studentName} yalnızca bu akademinin aktif öğrenci listesinden kaldırılır. Öğrenci profili, ödeme ve geçmiş kayıtları silinmez.</DialogDescription></DialogHeader><ActionForm action={deactivateAcademyEnrollment} className="space-y-3"><input type="hidden" name="enrollmentId" value={enrollmentId} /><Button type="submit" variant="destructive" className="w-full">Akademi kaydını kaldır</Button></ActionForm></DialogContent></Dialog>;
 }
 
 function Field({ label, name, type = "text", required = false, placeholder, min, step, defaultValue }: { label: string; name: string; type?: string; required?: boolean; placeholder?: string; min?: string; step?: string; defaultValue?: string }) {
