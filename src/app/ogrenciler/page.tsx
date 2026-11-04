@@ -1,7 +1,9 @@
 import Link from "next/link";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { PageHeader } from "@/components/page-header";
 import { Pagination } from "@/components/pagination";
+import { StudentEnrollmentStatusDialog } from "@/components/student-enrollment-status-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -33,6 +35,9 @@ export default async function StudentsPage({
   const academy = z
     .enum(["PRIMARY", "MIDDLE", "HIGH"])
     .safeParse(single(params.academy));
+  const studentStatus = z
+    .enum(["ACTIVE", "PASSIVE"])
+    .safeParse(single(params.studentStatus));
   const sort = z
     .enum(["name", "phone", "district", "courses"])
     .catch("name")
@@ -43,10 +48,19 @@ export default async function StudentsPage({
     .parse(single(params.direction));
   const { page, pageSize, skip } = pagination(params);
   const searchTerms = q?.split(/\s+/).filter(Boolean) ?? [];
-  const where = {
-    ...(courseId.success
-      ? { enrollments: { some: { courseId: courseId.data } } }
-      : {}),
+  const enrollmentFilters: Prisma.StudentWhereInput[] = [];
+  if (courseId.success) {
+    enrollmentFilters.push({ enrollments: { some: { courseId: courseId.data } } });
+  }
+  if (studentStatus.success) {
+    enrollmentFilters.push(
+      studentStatus.data === "ACTIVE"
+        ? { enrollments: { some: { status: "ACTIVE" } } }
+        : { enrollments: { none: { status: "ACTIVE" } } },
+    );
+  }
+  const where: Prisma.StudentWhereInput = {
+    AND: enrollmentFilters,
     ...(academy.success
       ? { academyEnrollments: { some: { academy: academy.data, isActive: true } } }
       : {}),
@@ -107,6 +121,7 @@ export default async function StudentsPage({
     q,
     courseId: courseId.success ? courseId.data : "ALL",
     academy: academy.success ? academy.data : "ALL",
+    studentStatus: studentStatus.success ? studentStatus.data : "ALL",
     sort,
     direction,
   };
@@ -118,7 +133,7 @@ export default async function StudentsPage({
       />
       <Card>
         <CardContent className="pt-6">
-          <form className="mb-5 grid gap-3 md:grid-cols-[1fr_180px_180px_auto] md:items-end">
+          <form className="mb-5 grid gap-3 md:grid-cols-[1fr_170px_170px_170px_auto] md:items-end">
             <div className="flex-1 space-y-2">
               <Label htmlFor="student-search">Ad soyad veya telefon</Label>
               <Input
@@ -158,6 +173,19 @@ export default async function StudentsPage({
                 ))}
               </select>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="student-status">Kayıt durumu</Label>
+              <select
+                id="student-status"
+                name="studentStatus"
+                defaultValue={studentStatus.success ? studentStatus.data : "ALL"}
+                className="h-8 w-full rounded-lg border bg-transparent px-2 text-sm"
+              >
+                <option value="ALL">Tümü</option>
+                <option value="ACTIVE">Aktif</option>
+                <option value="PASSIVE">Pasif</option>
+              </select>
+            </div>
             <Button type="submit">Ara</Button>
           </form>
           <Table>
@@ -182,8 +210,6 @@ export default async function StudentsPage({
                     Öğrenci
                   </TableSortLink>
                 </TableHead>
-                <TableHead>Akademi</TableHead>
-                <TableHead>Veli</TableHead>
                 <TableHead>
                   <TableSortLink
                     href={{
@@ -235,6 +261,10 @@ export default async function StudentsPage({
                     Dersler
                   </TableSortLink>
                 </TableHead>
+                <TableHead>Akademi</TableHead>
+                <TableHead>Veli</TableHead>
+                <TableHead>Kayıt durumu</TableHead>
+                <TableHead className="text-right">İşlemler</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -251,6 +281,11 @@ export default async function StudentsPage({
                   <TableCell>{student.phone ?? "—"}</TableCell>
                   <TableCell>{student.district ?? "—"}</TableCell>
                   <TableCell>
+                    {student.enrollments
+                      .map((enrollment) => enrollment.course.name)
+                      .join(", ") || "—"}
+                  </TableCell>
+                  <TableCell>
                     {student.academyEnrollments
                       .map((enrollment) => academyLabels[enrollment.academy])
                       .join(", ") || "—"}
@@ -261,9 +296,21 @@ export default async function StudentsPage({
                       .join(", ") || "—"}
                   </TableCell>
                   <TableCell>
-                    {student.enrollments
-                      .map((enrollment) => enrollment.course.name)
-                      .join(", ") || "—"}
+                    {student.enrollments.some((enrollment) => enrollment.status === "ACTIVE")
+                      ? "Aktif"
+                      : "Pasif"}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="outline" render={<Link href={`/ogrenciler/${student.id}`} />}>
+                        Aç
+                      </Button>
+                      <StudentEnrollmentStatusDialog
+                        studentId={student.id}
+                        studentName={`${student.firstName} ${student.lastName}`}
+                        enrollments={student.enrollments}
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

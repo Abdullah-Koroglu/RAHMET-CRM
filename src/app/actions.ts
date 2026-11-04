@@ -134,6 +134,11 @@ const academyEnrollmentUpdateSchema = academyEnrollmentSchema.extend({
   guardianId: id.optional(),
 });
 const academyEnrollmentRemovalSchema = z.object({ enrollmentId: id });
+const studentEnrollmentDeactivationSchema = z.object({
+  studentId: id,
+  enrollmentIds: z.array(id).min(1).max(100),
+  reason: requiredText(1000),
+});
 
 const academyPaymentSchema = z.object({
   enrollmentId: id,
@@ -1058,6 +1063,66 @@ export async function cancelConvertedPreRegistration(
       "cancelConvertedPreRegistration",
       error,
       "Kesin kayıt iptal edilemedi. Kayıt durumunu kontrol edin.",
+    );
+  }
+}
+
+export async function deactivateStudentEnrollments(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = studentEnrollmentDeactivationSchema.safeParse({
+    studentId: formValue(formData, "studentId"),
+    enrollmentIds: formData.getAll("enrollmentIds").map(String),
+    reason: formValue(formData, "reason"),
+  });
+  if (!parsed.success) return invalid();
+  try {
+    const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
+    const result = await db.$transaction(async (tx) => {
+      const enrollments = await tx.enrollment.findMany({
+        where: {
+          studentId: parsed.data.studentId,
+          id: { in: parsed.data.enrollmentIds },
+          status: "ACTIVE",
+        },
+        select: { id: true, courseId: true },
+      });
+      if (enrollments.length !== new Set(parsed.data.enrollmentIds).size) {
+        throw new Error("ENROLLMENT_NOT_ACTIVE");
+      }
+      await tx.enrollment.updateMany({
+        where: { id: { in: enrollments.map((enrollment) => enrollment.id) } },
+        data: { status: "CANCELLED" },
+      });
+      await Promise.all(
+        enrollments.map((enrollment) =>
+          writeAudit(tx, user.id, "ENROLLMENT_CANCELLED", "Enrollment", enrollment.id, {
+            studentId: parsed.data.studentId,
+            courseId: enrollment.courseId,
+            reason: parsed.data.reason,
+            source: "student-profile-enrollment-deactivation",
+          }),
+        ),
+      );
+      return enrollments;
+    });
+    revalidatePath("/ogrenciler");
+    revalidatePath(`/ogrenciler/${parsed.data.studentId}`);
+    for (const enrollment of result) {
+      revalidatePath(`/dersler/${enrollment.courseId}`);
+      revalidatePath(`/dersler/${enrollment.courseId}/ogrenciler`);
+    }
+    return actionSuccess(
+      result.length === 1
+        ? "Ders kaydı pasife alındı. Tahsilat ve yoklama geçmişi korundu."
+        : `${result.length} ders kaydı pasife alındı. Tahsilat ve yoklama geçmişi korundu.`,
+    );
+  } catch (error) {
+    return failed(
+      "deactivateStudentEnrollments",
+      error,
+      "Ders kayıtları pasife alınamadı. Durumu kontrol edip tekrar deneyin.",
     );
   }
 }

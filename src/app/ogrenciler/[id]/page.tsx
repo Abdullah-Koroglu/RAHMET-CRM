@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { StudentProfileDialog } from "@/components/student-profile-dialog";
 import { StudentPaymentDialog } from "@/components/student-payment-dialog";
+import { StudentEnrollmentStatusDialog } from "@/components/student-enrollment-status-dialog";
 import { TableSortLink } from "@/components/table-sort-link";
 import { canMutateOperations, getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -206,7 +207,14 @@ export default async function StudentDetailPage({
         description="Öğrenci profili, ders kayıtları ve cari hesabı."
         actions={
           canMutateOperations(user.role) ? (
-            <StudentProfileDialog student={student} />
+            <div className="flex flex-wrap gap-2">
+              <StudentProfileDialog student={student} />
+              <StudentEnrollmentStatusDialog
+                studentId={student.id}
+                studentName={`${student.firstName} ${student.lastName}`}
+                enrollments={student.enrollments}
+              />
+            </div>
           ) : undefined
         }
       />
