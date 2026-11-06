@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 const nav = [
   { href: "/", label: "Genel görünüm", icon: LayoutDashboard },
   { href: "/akademiler", label: "Akademiler", icon: GraduationCap },
+  { href: "/atolyeler", label: "Atölye & Workshop", icon: UsersRound },
   { href: "/dersler", label: "Dersler", icon: BookOpen },
   { href: "/on-kayitlar", label: "Ön kayıtlar", icon: UsersRound },
   { href: "/ogrenciler", label: "Öğrenciler", icon: GraduationCap },

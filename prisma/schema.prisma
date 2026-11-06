@@ -101,6 +101,13 @@ enum AcademyType {
   @@schema("rahmet_crm")
 }
 
+enum WorkshopRegistrationStatus {
+  ACTIVE
+  CANCELLED
+
+  @@schema("rahmet_crm")
+}
+
 enum IntegrationStatus {
   RECEIVED
   PROCESSED
@@ -146,6 +153,8 @@ model AppUser {
   monthlyCharges           StudentMonthlyCharge[]        @relation("MonthlyChargeCreatedBy")
   carryoverLines           StudentMonthlyCarryoverLine[] @relation("CarryoverLineCreatedBy")
   academyPayments          AcademyPayment[]
+  workshops                Workshop[]              @relation("WorkshopCreatedBy")
+  workshopPayments         WorkshopPayment[]       @relation("WorkshopPaymentCreatedBy")
   createdAt                DateTime                      @default(now()) @map("created_at")
   updatedAt                DateTime                      @updatedAt @map("updated_at")
 
@@ -332,10 +341,64 @@ model Student {
   monthlyCharges     StudentMonthlyCharge[]
   guardians          Guardian[]
   academyEnrollments AcademyEnrollment[]
+  workshopRegistrations WorkshopRegistration[]
   createdAt          DateTime                    @default(now()) @map("created_at")
 
   @@index([phone])
   @@map("student")
+  @@schema("rahmet_crm")
+}
+
+model Workshop {
+  id               String                @id @default(uuid()) @db.Uuid
+  title            String
+  description      String?
+  eventDate        DateTime              @map("event_date") @db.Date
+  defaultFeeAmount Decimal               @map("default_fee_amount") @db.Decimal(12, 2)
+  createdByUserId  String                @map("created_by_user_id") @db.Uuid
+  createdBy        AppUser               @relation("WorkshopCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  registrations    WorkshopRegistration[]
+  createdAt        DateTime              @default(now()) @map("created_at")
+  updatedAt        DateTime              @updatedAt @map("updated_at")
+
+  @@index([eventDate])
+  @@map("workshop")
+  @@schema("rahmet_crm")
+}
+
+model WorkshopRegistration {
+  id             String                    @id @default(uuid()) @db.Uuid
+  workshopId     String                    @map("workshop_id") @db.Uuid
+  studentId      String?                   @map("student_id") @db.Uuid
+  participantName String                   @map("participant_name")
+  participantPhone String?                 @map("participant_phone")
+  expectedAmount Decimal                   @map("expected_amount") @db.Decimal(12, 2)
+  status         WorkshopRegistrationStatus @default(ACTIVE)
+  workshop       Workshop                  @relation(fields: [workshopId], references: [id], onDelete: Restrict)
+  student        Student?                  @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  payments       WorkshopPayment[]
+  createdAt      DateTime                  @default(now()) @map("created_at")
+  updatedAt      DateTime                  @updatedAt @map("updated_at")
+
+  @@unique([workshopId, studentId])
+  @@index([workshopId, status])
+  @@map("workshop_registration")
+  @@schema("rahmet_crm")
+}
+
+model WorkshopPayment {
+  id                     String               @id @default(uuid()) @db.Uuid
+  workshopRegistrationId String               @map("workshop_registration_id") @db.Uuid
+  amount                 Decimal              @db.Decimal(12, 2)
+  paidOn                 DateTime             @map("paid_on") @db.Date
+  note                   String?
+  createdByUserId        String               @map("created_by_user_id") @db.Uuid
+  registration           WorkshopRegistration @relation(fields: [workshopRegistrationId], references: [id], onDelete: Restrict)
+  createdBy              AppUser              @relation("WorkshopPaymentCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt              DateTime             @default(now()) @map("created_at")
+
+  @@index([workshopRegistrationId, paidOn])
+  @@map("workshop_payment")
   @@schema("rahmet_crm")
 }
 

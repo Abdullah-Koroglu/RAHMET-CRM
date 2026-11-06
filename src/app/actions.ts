@@ -149,6 +149,29 @@ const academyPaymentSchema = z.object({
   note: optionalText(500),
 });
 
+const workshopSchema = z.object({
+  title: requiredText(150),
+  description: optionalText(500),
+  eventDate: z.string().date(),
+  defaultFeeAmount: money,
+});
+
+const workshopRegistrationSchema = z.object({
+  workshopId: id,
+  participantName: requiredText(200),
+  participantPhone: optionalText(50),
+  expectedAmount: money,
+});
+
+const workshopPaymentSchema = z.object({
+  registrationId: id,
+  amount: money.refine((value) => value.greaterThan(0), {
+    message: "Ödeme tutarı sıfırdan büyük olmalıdır.",
+  }),
+  paidOn: z.string().date(),
+  note: optionalText(500),
+});
+
 async function secure<T>(
   roles: ("ADMIN" | "OPERATOR" | "VIEWER")[],
   operation: () => Promise<T>,
@@ -423,6 +446,107 @@ export async function recordAcademyPayment(
     return actionSuccess("Akademi ödemesi kaydedildi.");
   } catch (error) {
     return failed("recordAcademyPayment", error, "Ödeme kaydedilemedi.");
+  }
+}
+
+export async function createWorkshop(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = workshopSchema.safeParse({
+    title: formValue(formData, "title"),
+    description: formValue(formData, "description"),
+    eventDate: formValue(formData, "eventDate"),
+    defaultFeeAmount: formValue(formData, "defaultFeeAmount"),
+  });
+  if (!parsed.success)
+    return actionError(parsed.error.issues[0]?.message ?? invalid().message);
+  try {
+    const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
+    const workshop = await db.$transaction(async (tx) => {
+      const created = await tx.workshop.create({
+        data: { ...parsed.data, eventDate: new Date(parsed.data.eventDate), createdByUserId: user.id },
+      });
+      await writeAudit(tx, user.id, "WORKSHOP_CREATED", "Workshop", created.id, {
+        title: created.title,
+        defaultFeeAmount: created.defaultFeeAmount.toString(),
+      });
+      return created;
+    });
+    revalidatePath("/atolyeler");
+    redirect(`/atolyeler/${workshop.id}`);
+  } catch (error) {
+    return failed("createWorkshop", error, "Atölye oluşturulamadı.");
+  }
+}
+
+export async function addWorkshopParticipant(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = workshopRegistrationSchema.safeParse({
+    workshopId: formValue(formData, "workshopId"),
+    participantName: formValue(formData, "participantName"),
+    participantPhone: formValue(formData, "participantPhone"),
+    expectedAmount: formValue(formData, "expectedAmount"),
+  });
+  if (!parsed.success)
+    return actionError(parsed.error.issues[0]?.message ?? invalid().message);
+  const phone = normalizeOptionalPhone(parsed.data.participantPhone);
+  if (parsed.data.participantPhone && !phone)
+    return actionError("Geçerli bir Türkiye telefon numarası girin.");
+  try {
+    const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
+    await db.$transaction(async (tx) => {
+      const registration = await tx.workshopRegistration.create({
+        data: { ...parsed.data, participantPhone: phone },
+      });
+      await writeAudit(tx, user.id, "WORKSHOP_PARTICIPANT_ADDED", "WorkshopRegistration", registration.id, {
+        workshopId: registration.workshopId,
+        participantName: registration.participantName,
+      });
+    });
+    revalidatePath(`/atolyeler/${parsed.data.workshopId}`);
+    revalidatePath("/atolyeler");
+    return actionSuccess("Katılımcı eklendi.");
+  } catch (error) {
+    return failed("addWorkshopParticipant", error, "Katılımcı eklenemedi.");
+  }
+}
+
+export async function recordWorkshopPayment(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = workshopPaymentSchema.safeParse({
+    registrationId: formValue(formData, "registrationId"),
+    amount: formValue(formData, "amount"),
+    paidOn: formValue(formData, "paidOn"),
+    note: formValue(formData, "note"),
+  });
+  if (!parsed.success)
+    return actionError(parsed.error.issues[0]?.message ?? invalid().message);
+  try {
+    const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
+    const workshopId = await db.$transaction(async (tx) => {
+      const registration = await tx.workshopRegistration.findFirstOrThrow({
+        where: { id: parsed.data.registrationId, status: "ACTIVE" },
+      });
+      const payment = await tx.workshopPayment.create({
+        data: { workshopRegistrationId: parsed.data.registrationId, amount: parsed.data.amount, note: parsed.data.note, paidOn: new Date(parsed.data.paidOn), createdByUserId: user.id },
+      });
+      await writeAudit(tx, user.id, "WORKSHOP_PAYMENT_RECORDED", "WorkshopPayment", payment.id, {
+        workshopId: registration.workshopId,
+        registrationId: registration.id,
+        amount: payment.amount.toString(),
+      });
+      return registration.workshopId;
+    });
+    revalidatePath(`/atolyeler/${workshopId}`);
+    revalidatePath("/atolyeler");
+    return actionSuccess("Atölye ödemesi kaydedildi.");
+  } catch (error) {
+    return failed("recordWorkshopPayment", error, "Ödeme kaydedilemedi.");
   }
 }
 
