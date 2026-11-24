@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import type { FormEvent } from "react";
 
 import {
   createMonthlyChargesForActiveStudents,
@@ -74,7 +74,10 @@ export function MonthlyPaymentDialog({
   month: string;
   today: string;
 }) {
-  const [paymentRequestId] = useState(() => crypto.randomUUID());
+  const renewPaymentRequestId = (event: FormEvent<HTMLFormElement>) => {
+    const field = event.currentTarget.elements.namedItem("paymentRequestId");
+    if (field instanceof HTMLInputElement) field.value = crypto.randomUUID();
+  };
   return (
     <Dialog>
       <DialogTrigger render={<Button size="sm" />}>
@@ -85,9 +88,9 @@ export function MonthlyPaymentDialog({
           <DialogTitle>Aylık ödeme ekle</DialogTitle>
           <DialogDescription>{studentName} · {month}. Tahakkuk varsa ödeme otomatik olarak bağlanır. Devreden ders borcuna mahsup etmek için aşağıdaki seçeneği işaretleyin.</DialogDescription>
         </DialogHeader>
-        <ActionForm action={recordStudentPayment} className="space-y-3">
+        <ActionForm action={recordStudentPayment} className="space-y-3" onSubmit={renewPaymentRequestId}>
           <input type="hidden" name="studentId" value={studentId} />
-          <input type="hidden" name="paymentRequestId" value={paymentRequestId} />
+          <input type="hidden" name="paymentRequestId" defaultValue={crypto.randomUUID()} />
           <input type="hidden" name="month" value={month} />
           <div className="space-y-2">
             <Label htmlFor={`monthly-payment-amount-${studentId}`}>Alınan ödeme (TL)</Label>
