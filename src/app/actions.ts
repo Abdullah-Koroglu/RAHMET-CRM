@@ -1754,11 +1754,29 @@ export async function recordStudentPayment(
   if (!parsed.success) return invalid();
   try {
     const { user } = await secure(["ADMIN", "OPERATOR"], async () => null);
+    let paymentRequestId = parsed.data.paymentRequestId;
     const created = await db.$transaction(async (tx) => {
       const alreadyRecorded = await tx.studentAccountEntry.findUnique({
-        where: { paymentRequestId: parsed.data.paymentRequestId },
+        where: { paymentRequestId },
+        select: {
+          studentId: true,
+          amount: true,
+          occurredOn: true,
+          monthlyCharge: { select: { billingMonth: true } },
+        },
       });
-      if (alreadyRecorded) return false;
+      if (alreadyRecorded) {
+        const isSamePayment =
+          alreadyRecorded.studentId === parsed.data.studentId &&
+          alreadyRecorded.amount.equals(parsed.data.amount) &&
+          alreadyRecorded.occurredOn.toISOString().slice(0, 10) === parsed.data.paidOn &&
+          alreadyRecorded.monthlyCharge?.billingMonth.toISOString().slice(0, 7) === parsed.data.month;
+        if (isSamePayment) return false;
+
+        // An open page can retain an old request id after a successful payment.
+        // Preserve duplicate-submit protection, but do not block a distinct payment.
+        paymentRequestId = randomUUID();
+      }
       await tx.student.findUniqueOrThrow({ where: { id: parsed.data.studentId } });
       const activeEnrollments = await tx.enrollment.findMany({
         where: { studentId: parsed.data.studentId, status: "ACTIVE" },
@@ -1835,7 +1853,7 @@ export async function recordStudentPayment(
         data: {
           studentId: parsed.data.studentId,
           monthlyChargeId: charge?.id,
-          paymentRequestId: parsed.data.paymentRequestId,
+          paymentRequestId,
           entryType: "PAYMENT",
           amount: parsed.data.amount,
           note: parsed.data.note,
