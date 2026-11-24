@@ -135,8 +135,11 @@ export default async function StudentDetailPage({
         ),
       })),
   );
-  const carryoverTotal = carryoverLines.reduce(
-    (sum, line) => sum.plus(line.amount),
+  const carryoverRemaining = carryoverLines.reduce(
+    (sum, line) =>
+      sum.plus(
+        Prisma.Decimal.max(new Prisma.Decimal(0), line.amount.minus(line.paidAmount)),
+      ),
     new Prisma.Decimal(0),
   );
   const displayedEnrollments = student.enrollments
@@ -419,14 +422,29 @@ export default async function StudentDetailPage({
             <div className="space-y-2 border-t pt-4">
               <div className="flex items-baseline justify-between gap-3">
                 <p className="text-sm font-medium">Devreden ders borcu</p>
-                <p className="font-semibold text-amber-700">
-                  {formatMoney(carryoverTotal)}
+                <p
+                  className={
+                    carryoverRemaining.greaterThan(0)
+                      ? "font-semibold text-amber-700"
+                      : "font-semibold text-emerald-700"
+                  }
+                >
+                  {carryoverRemaining.greaterThan(0)
+                    ? formatMoney(carryoverRemaining)
+                    : "Ödendi"}
                 </p>
               </div>
               {carryoverLines.length ? (
                 <div className="space-y-1 text-xs text-muted-foreground">
                   {carryoverLines.map((line) => (
-                    <p key={line.id}>
+                    <p
+                      key={line.id}
+                      className={
+                        line.paidAmount.greaterThanOrEqualTo(line.amount)
+                          ? "text-emerald-700"
+                          : "text-amber-700"
+                      }
+                    >
                       {line.billingMonth.toISOString().slice(0, 7)} · {line.enrollment.course.name} · {line.lessonCount} ders × {formatMoney(line.unitAmount)} = {formatMoney(line.amount)}
                       {line.paidAmount.greaterThanOrEqualTo(line.amount)
                         ? " · Ödendi"
